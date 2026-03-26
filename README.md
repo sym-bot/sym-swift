@@ -2,7 +2,7 @@
 
 **Infrastructure and protocol for multi-agent collective intelligence on iOS and macOS.**
 
-[SYM](https://github.com/sym-bot/sym) provides the mesh infrastructure, wire protocol, and cognitive coupling engine. You build domain-specific agents on top. Your AI coding agent reads this README and wires your app into the mesh in minutes.
+[SYM](https://github.com/sym-bot/sym) provides the mesh infrastructure and wire protocol. SYM decides what gets shared between agents — you build the domain logic on top. Your AI coding agent reads this README and wires your app into the mesh in minutes.
 
 > *"Add SYM to my iOS app so it joins the mesh and thinks together with my other agents."*
 
@@ -102,7 +102,7 @@ final class MeshService: ObservableObject {
         let symNode = SymNode(
             name: "my-app",
             cognitiveProfile: "Fitness agent that tracks workouts, heart rate, and energy levels"
-            // Be specific — the coupling engine uses this to evaluate drift with other agents
+            // Be specific — SYM uses this to evaluate relevance with other agents
         )
         self.node = symNode
 
