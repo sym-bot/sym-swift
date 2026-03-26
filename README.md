@@ -9,13 +9,9 @@
 [![Swift](https://img.shields.io/badge/Swift_SPM-compatible-orange)](https://github.com/sym-bot/sym-swift)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-## What SYM Provides
+## What SYM Handles
 
-**Infrastructure:** Bonjour LAN discovery, TCP connection management, WebSocket relay for WAN, background wake via APNs. Your app finds other agents automatically — no servers to run, no accounts to create.
-
-**Protocol:** Length-prefixed JSON framing, handshake, heartbeat, mood broadcast, memory sharing, state sync. Interoperable between Swift and Node.js — an iOS app and Claude Code on the same network speak the same protocol.
-
-**Cognitive coupling engine:** Agents don't blindly share everything. The coupling engine evaluates cognitive drift between agents and autonomously decides whether to couple. Aligned agents share. Divergent agents stay independent.
+SYM handles discovery, connection, and collective intelligence. Your app finds other agents on the local network automatically — no servers, no accounts, no configuration. An iOS app and Claude Code on the same network discover each other and think together using the same protocol.
 
 You build the domain logic — what your agent observes and how it responds to mesh events.
 
@@ -105,7 +101,8 @@ final class MeshService: ObservableObject {
 
         let symNode = SymNode(
             name: "my-app",
-            cognitiveProfile: "What this agent understands and responds to"
+            cognitiveProfile: "Fitness agent that tracks workouts, heart rate, and energy levels"
+            // Be specific — the coupling engine uses this to evaluate drift with other agents
         )
         self.node = symNode
 
@@ -261,7 +258,6 @@ SDK logs use the `[SYM]` prefix with categories:
 ```
 [SYM] node: started: my-app (a1b2c3d4)
 [SYM] discovery: found peer: other-app (e5f6g7h8)
-[SYM] discovery: resolved other-app to hostname.local.:54321
 [SYM] session: connection ready (outbound=true)
 [SYM] session: handshake complete with other-app (e5f6g7h8)
 [SYM] peer: connected: other-app (outbound, bonjour)
