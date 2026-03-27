@@ -30,7 +30,7 @@ public enum SymEvent {
     case moodAccepted(from: String, mood: String, drift: Float)
     case moodRejected(from: String, mood: String, drift: Float)
     case message(from: String, content: String)
-    /// xMesh insight received — collective intelligence from the meshed LNN.
+    /// xMesh insight received — a peer agent's cognitive state from its own LNN.
     /// Contains trajectory, patterns, anomaly score, predicted outcome.
     case xmeshInsight(from: String, trajectory: [Float], patterns: [Float], anomaly: Float, outcome: String, coherence: Float)
     /// Peer's cognitive state received via state-sync frame.
@@ -68,7 +68,7 @@ public struct SymNodeStatus: Sendable {
 
 // MARK: - xMesh Insight
 
-/// Output from the xMesh meshed LNN — collective intelligence.
+/// Output from a peer agent's xMesh LNN — cognitive state evolved from bidirectional CMB flows.
 public struct XMeshInsight: Sendable {
     public let trajectory: [Float]   // [valence, arousal, v_vel, a_vel, stability, confidence]
     public let patterns: [Float]     // 8 pattern activations
@@ -81,9 +81,10 @@ public struct XMeshInsight: Sendable {
 
 /// Protocol for agents to participate in the xMesh synthesis loop.
 ///
-/// The SYM SDK calls `synthesizeInsight` when xMesh produces collective intelligence.
-/// The agent returns its domain-specific interpretation, or nil to skip.
-/// SYM handles sharing the synthesis back to the mesh automatically.
+/// When a peer's xMesh insight arrives, the agent processes it through its own
+/// domain intelligence and returns a domain-specific interpretation (new outbound CMB),
+/// or nil to skip. SYM shares the synthesis back to the mesh — completing the
+/// bidirectional CMB flow.
 ///
 /// Example:
 /// ```swift
@@ -159,8 +160,8 @@ public final class SymNode {
     /// Event handlers.
     private var eventHandlers: [(SymEvent) -> Void] = []
 
-    /// Synthesis delegate — SYM SDK calls this when xMesh insight arrives.
-    /// Agent returns domain-specific insight. SYM shares it back to mesh.
+    /// Synthesis delegate — agent processes peer xMesh insight through its own domain intelligence.
+    /// Returns domain-specific insight as a new outbound CMB. SYM shares it back to mesh.
     public weak var synthesisDelegate: SYMSynthesisDelegate?
 
     /// LLM field extractor — app provides LLM implementation for CMB field extraction.

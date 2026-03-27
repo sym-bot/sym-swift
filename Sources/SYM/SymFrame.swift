@@ -65,7 +65,7 @@ public struct SymFrame: Codable, Sendable {
     // SVAF v2: Cognitive Memory Block
     public var cmb: CognitiveMemoryBlock?
 
-    // xMesh insight (Layer 6 output)
+    // xMesh insight (peer agent's cognitive state from its own LNN)
     public var trajectory: [Float]?
     public var patterns: [Float]?
     public var anomaly: Float?
