@@ -143,7 +143,7 @@ public final class SymNode {
 
     private let identity: SymIdentity
     private let store: SymMemoryStore
-    private let meshNode: MMPMeshNode
+    private let meshNode: MeshNode
     private let discovery: SymDiscovery
     private let logger: Logger
 
@@ -251,7 +251,7 @@ public final class SymNode {
 
         let nodeDir = SymIdentityManager.nodeDirectory(for: name)
         self.store = SymMemoryStore(nodeDir: nodeDir, sourceName: name)
-        self.meshNode = MMPMeshNode(hiddenDim: ContextEncoder.dim)
+        self.meshNode = MeshNode(options: MeshNodeOptions(hiddenDim: ContextEncoder.dim))
         self.discovery = SymDiscovery(identity: identity)
 
         initLocalState()
