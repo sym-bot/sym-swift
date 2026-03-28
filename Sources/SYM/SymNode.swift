@@ -192,6 +192,10 @@ public final class SymNode {
     // Wake
     private var wakeChannel: (platform: String, token: String, environment: String)?
 
+    /// Known peer wake channels learned from peer-info gossip. Keyed by nodeId.
+    /// Access only via stateQueue.
+    private var peerWakeChannels: [String: SymWakeChannel] = [:]
+
     // MARK: - Internal Peer State
 
     private struct PeerState {
@@ -607,6 +611,12 @@ public final class SymNode {
             session.send(.wakeChannel(platform: wc.platform, token: wc.token, environment: wc.environment))
         }
 
+        // Share known peers (gossip) so the new peer learns about the mesh
+        let knownPeers = buildPeerGossip(excluding: nodeId)
+        if !knownPeers.isEmpty {
+            session.send(.peerInfo(peers: knownPeers))
+        }
+
         logger.info("[SYM] peer: connected: \(peerName) (\(isOutbound ? "outbound" : "inbound"), bonjour)")
         emit(.peerJoined(nodeId: nodeId, name: peerName))
     }
@@ -637,6 +647,12 @@ public final class SymNode {
             relaySession?.send(.wakeChannel(platform: wc.platform, token: wc.token, environment: wc.environment), to: nodeId)
         }
 
+        // Share known peers (gossip) so the new peer learns about the mesh
+        let knownPeers = buildPeerGossip(excluding: nodeId)
+        if !knownPeers.isEmpty {
+            relaySession?.send(.peerInfo(peers: knownPeers), to: nodeId)
+        }
+
         logger.info("[SYM] peer: connected: \(peerName) (outbound, relay)")
         emit(.peerJoined(nodeId: nodeId, name: peerName))
     }
@@ -647,6 +663,21 @@ public final class SymNode {
         }
         for nodeId in relayPeerIds {
             removePeer(nodeId: nodeId)
+        }
+    }
+
+    /// Build gossip payload of known peers (excluding `excludeId`) for peer-info frames.
+    private func buildPeerGossip(excluding excludeId: String) -> [SymPeerGossip] {
+        let currentPeers: [String: PeerState] = peerQueue.sync { self.peers }
+        let wakeChannels: [String: SymWakeChannel] = stateQueue.sync { self.peerWakeChannels }
+
+        return currentPeers.compactMap { (id, state) -> SymPeerGossip? in
+            guard id != excludeId else { return nil }
+            return SymPeerGossip(
+                nodeId: id,
+                name: state.name,
+                wakeChannel: wakeChannels[id]
+            )
         }
     }
 
@@ -880,6 +911,17 @@ public final class SymNode {
                 remember(synthesis, tags: ["xmesh-synthesis"])
                 logger.info("[SYM] xmesh: synthesis: shared domain insight back to mesh")
             }
+
+        case .peerInfo:
+            let gossipPeers = frame.peers ?? []
+            for peer in gossipPeers {
+                if let wc = peer.wakeChannel, let peerId = peer.nodeId {
+                    stateQueue.async { [weak self] in
+                        self?.peerWakeChannels[peerId] = wc
+                    }
+                }
+            }
+            logger.info("[SYM] gossip: learned \(gossipPeers.count) peer(s) from \(peerName)")
 
         case .wakeChannel:
             // Peer declared their wake channel — store it (survives disconnect)

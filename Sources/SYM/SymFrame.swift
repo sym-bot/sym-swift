@@ -10,6 +10,34 @@
 
 import Foundation
 
+// MARK: - Peer Gossip
+
+/// Gossip payload for peer-info frames — describes a known peer and its wake channel.
+public struct SymPeerGossip: Codable, Sendable {
+    public var nodeId: String?
+    public var name: String?
+    public var wakeChannel: SymWakeChannel?
+
+    public init(nodeId: String? = nil, name: String? = nil, wakeChannel: SymWakeChannel? = nil) {
+        self.nodeId = nodeId
+        self.name = name
+        self.wakeChannel = wakeChannel
+    }
+}
+
+/// Wake channel descriptor for a peer — platform, push token, environment.
+public struct SymWakeChannel: Codable, Sendable {
+    public var platform: String?
+    public var token: String?
+    public var environment: String?
+
+    public init(platform: String? = nil, token: String? = nil, environment: String? = nil) {
+        self.platform = platform
+        self.token = token
+        self.environment = environment
+    }
+}
+
 // MARK: - Frame Types
 
 /// SYM wire message types. Must match Node.js SymNode exactly.
@@ -22,6 +50,7 @@ public enum SymFrameType: String, Codable, Sendable {
     case wakeChannel = "wake-channel"
     case wake = "wake"
     case xmeshInsight = "xmesh-insight"
+    case peerInfo = "peer-info"
     case ping = "ping"
     case pong = "pong"
 }
@@ -78,6 +107,9 @@ public struct SymFrame: Codable, Sendable {
     public var environment: String?
     public var reason: String?
 
+    // Peer info (gossip)
+    public var peers: [SymPeerGossip]?
+
     public init(type: SymFrameType) {
         self.type = type
     }
@@ -126,6 +158,12 @@ public struct SymFrame: Codable, Sendable {
         frame.platform = platform
         frame.token = token
         frame.environment = environment
+        return frame
+    }
+
+    static func peerInfo(peers: [SymPeerGossip]) -> SymFrame {
+        var frame = SymFrame(type: .peerInfo)
+        frame.peers = peers
         return frame
     }
 
