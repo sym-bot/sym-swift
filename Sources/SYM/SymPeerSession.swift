@@ -36,17 +36,24 @@ final class SymPeerSession {
 
     // MARK: - Properties
 
-    /// The peer's node ID (set after handshake).
-    private(set) var peerNodeId: String?
+    /// Serial queue protecting mutable session state.
+    private let stateQueue = DispatchQueue(label: "bot.sym.peer-state")
 
-    /// The peer's display name (set after handshake).
-    private(set) var peerName: String?
+    /// The peer's node ID (set after handshake). Thread-safe read.
+    private var _peerNodeId: String?
+    var peerNodeId: String? { stateQueue.sync { _peerNodeId } }
 
-    /// Whether the handshake is complete and the session is active.
-    private(set) var isActive = false
+    /// The peer's display name (set after handshake). Thread-safe read.
+    private var _peerName: String?
+    var peerName: String? { stateQueue.sync { _peerName } }
 
-    /// Last time a frame was received.
-    private(set) var lastSeen = Date()
+    /// Whether the handshake is complete and the session is active. Thread-safe read.
+    private var _isActive = false
+    var isActive: Bool { stateQueue.sync { _isActive } }
+
+    /// Last time a frame was received. Thread-safe read.
+    private var _lastSeen = Date()
+    var lastSeen: Date { stateQueue.sync { _lastSeen } }
 
     private let connection: NWConnection
     private let identity: SymIdentity
@@ -109,7 +116,7 @@ final class SymPeerSession {
     func disconnect() {
         queue.async { [weak self] in
             guard let self else { return }
-            self.isActive = false
+            self.stateQueue.async { self._isActive = false }
             self.heartbeatTask?.cancel()
             self.connection.cancel()
         }
@@ -150,7 +157,7 @@ final class SymPeerSession {
             if let data = content, !data.isEmpty {
                 let frames = self.parser.feed(data)
                 for frame in frames {
-                    self.lastSeen = Date()
+                    self.stateQueue.async { self._lastSeen = Date() }
                     self.handleFrame(frame)
                 }
             }
@@ -174,9 +181,9 @@ final class SymPeerSession {
                 disconnect()
                 return
             }
-            peerNodeId = nodeId
-            peerName = name
-            isActive = true
+            stateQueue.async { [self] in _peerNodeId = nodeId }
+            stateQueue.async { [self] in _peerName = name }
+            stateQueue.async { [self] in _isActive = true }
             startHeartbeat()
             logger.info("[SYM] session: handshake complete with \(name) (\(nodeId.prefix(8)))")
             delegate?.session(self, didHandshakeWith: nodeId, name: name)
@@ -201,12 +208,12 @@ final class SymPeerSession {
 
         case .failed(let error):
             logger.error("[SYM] session: connection failed: \(error.localizedDescription)")
-            isActive = false
+            stateQueue.async { [self] in _isActive = false }
             heartbeatTask?.cancel()
             delegate?.session(self, didDisconnectWith: error.localizedDescription)
 
         case .cancelled:
-            isActive = false
+            stateQueue.async { [self] in _isActive = false }
             heartbeatTask?.cancel()
             delegate?.session(self, didDisconnectWith: "Connection cancelled")
 
@@ -245,7 +252,7 @@ final class SymPeerSession {
     // MARK: - Disconnect
 
     private func handleDisconnect(error: NWError?) {
-        isActive = false
+        stateQueue.async { [self] in _isActive = false }
         heartbeatTask?.cancel()
         let reason = error?.localizedDescription ?? "Connection closed"
         logger.info("[SYM] session: disconnected: \(reason)")

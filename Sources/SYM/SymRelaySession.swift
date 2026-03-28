@@ -145,6 +145,10 @@ final class SymRelaySession {
     private let token: String?
     private let logger = Logger(subsystem: "bot.sym", category: "RelaySession")
 
+    /// Serial queue protecting all mutable relay state.
+    private let queue = DispatchQueue(label: "bot.sym.relay", qos: .userInitiated)
+
+    // All mutable state below — access ONLY via `queue`.
     private var webSocketTask: URLSessionWebSocketTask?
     private var urlSession: URLSession?
     private var isConnected = false
@@ -166,22 +170,32 @@ final class SymRelaySession {
     // MARK: - Lifecycle
 
     func start() {
-        _running = true
-        connect()
+        queue.async { [self] in
+            _running = true
+            _connect()
+        }
     }
 
     func stop() {
-        _running = false
-        reconnectTask?.cancel()
-        reconnectTask = nil
-        disconnect()
+        queue.async { [self] in
+            _running = false
+            reconnectTask?.cancel()
+            reconnectTask = nil
+            _disconnect()
+        }
     }
 
     // MARK: - Send
 
     /// Send a SYM frame to a specific peer via the relay.
     func send(_ frame: SymFrame, to targetNodeId: String) {
-        guard isConnected, let ws = webSocketTask else { return }
+        queue.async { [self] in
+            guard isConnected, let ws = webSocketTask else { return }
+            _sendFrame(frame, to: targetNodeId, ws: ws)
+        }
+    }
+
+    private func _sendFrame(_ frame: SymFrame, to targetNodeId: String, ws: URLSessionWebSocketTask) {
 
         let frameDict = frameToDict(frame)
         var envelope: [String: Any] = [
@@ -203,26 +217,28 @@ final class SymRelaySession {
 
     /// Broadcast a SYM frame to all peers via the relay.
     func broadcast(_ frame: SymFrame) {
-        guard isConnected, let ws = webSocketTask else { return }
+        queue.async { [self] in
+            guard isConnected, let ws = webSocketTask else { return }
 
-        let frameDict = frameToDict(frame)
-        let envelope: [String: Any] = ["payload": frameDict]
+            let frameDict = frameToDict(frame)
+            let envelope: [String: Any] = ["payload": frameDict]
 
-        guard let data = try? JSONSerialization.data(withJSONObject: envelope),
-              let text = String(data: data, encoding: .utf8) else { return }
+            guard let data = try? JSONSerialization.data(withJSONObject: envelope),
+                  let text = String(data: data, encoding: .utf8) else { return }
 
-        ws.send(.string(text)) { [weak self] error in
-            if let error {
-                self?.logger.error("[SYM] relay: broadcast failed: \(error.localizedDescription)")
+            ws.send(.string(text)) { [weak self] error in
+                if let error {
+                    self?.logger.error("[SYM] relay: broadcast failed: \(error.localizedDescription)")
+                }
             }
         }
     }
 
     // MARK: - Connection
 
-    private func connect() {
+    private func _connect() {
         // Clean up any previous connection before reconnecting
-        disconnect()
+        _disconnect()
 
         let config = URLSessionConfiguration.default
         config.shouldUseExtendedBackgroundIdleMode = true
@@ -241,7 +257,7 @@ final class SymRelaySession {
         receiveLoop()
     }
 
-    private func disconnect() {
+    private func _disconnect() {
         isConnected = false
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
@@ -374,8 +390,11 @@ final class SymRelaySession {
 
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            guard !Task.isCancelled, let self, self._running else { return }
-            self.connect()
+            guard !Task.isCancelled, let self else { return }
+            self.queue.async {
+                guard self._running else { return }
+                self._connect()
+            }
         }
 
         // Exponential backoff capped at 30s

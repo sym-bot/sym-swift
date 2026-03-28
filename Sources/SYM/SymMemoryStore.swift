@@ -61,6 +61,8 @@ final class SymMemoryStore {
     private let sourceName: String
     private let fileManager = FileManager.default
     private let logger = Logger(subsystem: "bot.sym", category: "memory")
+    /// Serial queue protecting all file I/O — prevents concurrent read/write corruption.
+    private let ioQueue = DispatchQueue(label: "bot.sym.memory-io", qos: .utility)
 
     init(nodeDir: URL, sourceName: String) {
         self.memoriesDir = nodeDir.appendingPathComponent("memories")
