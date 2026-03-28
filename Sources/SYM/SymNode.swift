@@ -151,13 +151,17 @@ public final class SymNode {
     private var peers: [String: PeerState] = [:]
     private let peerQueue = DispatchQueue(label: "bot.sym.peers", qos: .userInitiated)
 
+    /// Protects non-peer mutable state: eventHandlers, _running, wakeChannel, pendingSessions.
+    private let stateQueue = DispatchQueue(label: "bot.sym.state", qos: .userInitiated)
+
     /// Inbound sessions awaiting handshake. Retained here to prevent ARC deallocation.
+    /// Access only via stateQueue.
     private var pendingSessions: [ObjectIdentifier: SymPeerSession] = [:]
 
     /// Track last coupling decision per peer — only log/emit on change.
     private var lastCouplingDecisions: [String: String] = [:]
 
-    /// Event handlers.
+    /// Event handlers. Access only via stateQueue.
     private var eventHandlers: [(SymEvent) -> Void] = []
 
     /// Synthesis delegate — agent processes peer xMesh insight through its own domain intelligence.
@@ -177,7 +181,7 @@ public final class SymNode {
     private let stateSyncInterval: TimeInterval
 
     private var _running = false
-    public var isRunning: Bool { _running }
+    public var isRunning: Bool { stateQueue.sync { _running } }
 
     // Relay
     private let relayURL: URL?
@@ -350,11 +354,14 @@ public final class SymNode {
 
     /// Register an event handler.
     public func on(_ handler: @escaping (SymEvent) -> Void) {
-        eventHandlers.append(handler)
+        stateQueue.async { [weak self] in
+            self?.eventHandlers.append(handler)
+        }
     }
 
     private func emit(_ event: SymEvent) {
-        for handler in eventHandlers {
+        let handlers = stateQueue.sync { eventHandlers }
+        for handler in handlers {
             handler(event)
         }
     }
@@ -700,7 +707,7 @@ public final class SymNode {
 
             let now = UInt64(Date().timeIntervalSince1970 * 1000)
             let originTs = frame.originTimestamp ?? frame.timestamp ?? now
-            let ageSeconds = Float(now - originTs) / 1000.0
+            let ageSeconds = now >= originTs ? Float(now - originTs) / 1000.0 : 0.0
             let temporalDecay: Float = exp(-ageSeconds / self.svafFreshnessSeconds)
             let temporalDrift: Float = 1.0 - temporalDecay
             let confidence: Float = frame.confidence ?? 0.8

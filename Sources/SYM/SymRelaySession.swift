@@ -422,7 +422,7 @@ final class SymRelaySession {
         frame.content = dict["content"] as? String
         frame.source = dict["source"] as? String
         frame.tags = dict["tags"] as? [String]
-        frame.timestamp = dict["timestamp"] as? UInt64
+        frame.timestamp = (dict["timestamp"] as? NSNumber).map { UInt64(truncating: $0) }
         frame.mood = dict["mood"] as? String
         frame.context = dict["context"] as? String
         frame.from = dict["from"] as? String

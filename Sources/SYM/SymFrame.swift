@@ -183,7 +183,9 @@ final class SymFrameParser {
                 let frame = try JSONDecoder().decode(SymFrame.self, from: jsonData)
                 frames.append(frame)
             } catch {
-                // Skip malformed frame, continue parsing
+                #if DEBUG
+                print("[SYM] frame: malformed JSON: \(error)")
+                #endif
             }
         }
 

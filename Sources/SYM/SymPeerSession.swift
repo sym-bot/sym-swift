@@ -72,7 +72,9 @@ final class SymPeerSession {
     /// Outbound connection to a direct host:port.
     init(remoteHost host: String, port: UInt16, identity: SymIdentity) {
         let nwHost = NWEndpoint.Host(host)
-        let nwPort = NWEndpoint.Port(rawValue: port)!
+        guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+            fatalError("[SYM] Invalid port: \(port)")
+        }
         let parameters = NWParameters.tcp
         self.connection = NWConnection(host: nwHost, port: nwPort, using: parameters)
         self.identity = identity

@@ -10,6 +10,7 @@
 
 import Foundation
 import SYMCore
+import os.log
 
 // MARK: - Memory Entry
 
@@ -59,6 +60,7 @@ final class SymMemoryStore {
     private let memoriesDir: URL
     private let sourceName: String
     private let fileManager = FileManager.default
+    private let logger = Logger(subsystem: "bot.sym", category: "memory")
 
     init(nodeDir: URL, sourceName: String) {
         self.memoriesDir = nodeDir.appendingPathComponent("memories")
@@ -84,9 +86,13 @@ final class SymMemoryStore {
         let dir = memoriesDir.appendingPathComponent("local")
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        let file = dir.appendingPathComponent("\(entry.storedAt).json")
-        if let data = try? JSONEncoder().encode(entry) {
-            try? data.write(to: file)
+        let suffix = UUID().uuidString.prefix(8)
+        let file = dir.appendingPathComponent("\(entry.storedAt)-\(suffix).json")
+        do {
+            let data = try JSONEncoder().encode(entry)
+            try data.write(to: file)
+        } catch {
+            logger.error("[SYM] memory: write failed: \(error.localizedDescription)")
         }
 
         return entry
@@ -98,9 +104,13 @@ final class SymMemoryStore {
         let dir = memoriesDir.appendingPathComponent(shortId)
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        let file = dir.appendingPathComponent("\(entry.storedAt).json")
-        if let data = try? JSONEncoder().encode(entry) {
-            try? data.write(to: file)
+        let suffix = UUID().uuidString.prefix(8)
+        let file = dir.appendingPathComponent("\(entry.storedAt)-\(suffix).json")
+        do {
+            let data = try JSONEncoder().encode(entry)
+            try data.write(to: file)
+        } catch {
+            logger.error("[SYM] memory: peer write failed: \(error.localizedDescription)")
         }
     }
 
