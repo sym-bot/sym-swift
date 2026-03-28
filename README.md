@@ -7,6 +7,7 @@
 > *"Add SYM to my iOS app so it joins the mesh and thinks together with my other agents."*
 
 [![Swift](https://img.shields.io/badge/Swift_SPM-compatible-orange)](https://github.com/sym-bot/sym-swift)
+[![MMP Spec](https://img.shields.io/badge/MMP_Spec-v0.2.0-purple)](https://sym.bot/spec/mmp)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
 ## What SYM Handles
