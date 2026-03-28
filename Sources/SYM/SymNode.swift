@@ -832,7 +832,7 @@ public final class SymNode {
                 storedAt: now,
                 confidence: confidence * (1.0 - aggregateFieldDrift),
                 provenance: CMBProvenance(
-                    fusedFrom: [incomingCMB.id] + anchors.map(\.id),
+                    fusedFrom: [incomingCMB.key] + anchors.map(\.key),
                     fusionWeights: anchorWeightsLog,
                     fieldDrift: fieldDrifts,
                     totalDrift: totalDrift,
