@@ -415,8 +415,9 @@ public final class SymNode {
         let cmb = CMBEncoder.createCMB(fields: fields, source: name, originTimestamp: ts, lineage: lineage)
         let content = CMBEncoder.renderContent(from: cmb)
         logger.info("[SYM] remember: \"\(content.prefix(80))\"")
-        let entry = store.write(content: content, tags: tags, originTimestamp: originTimestamp, cmb: cmb)
-        return _afterRemember(entry)
+        let entry = CMBStoreEntry(content: content, source: name, tags: tags, originTimestamp: originTimestamp, cmb: cmb)
+        guard let stored = store.write(entry: entry) else { return entry }
+        return _afterRemember(stored)
     }
 
     /// Shared post-remember logic: re-encode, evaluate coupling, broadcast to peers.
@@ -918,7 +919,10 @@ public final class SymNode {
             // 2. Synthesis loop: call delegate, share insight back to mesh
             let insight = XMeshInsight(trajectory: trajectory, patterns: patterns, anomaly: anomaly, outcome: outcome, coherence: coherence)
             if let synthesis = synthesisDelegate?.synthesizeInsight(from: insight) {
-                remember(synthesis, tags: ["xmesh-synthesis"])
+                remember(fields: [
+                    .focus: CMBEncoder.encodeField(synthesis),
+                    .mood: CMBEncoder.encodeField("neutral"),
+                ], tags: ["xmesh-synthesis"])
                 logger.info("[SYM] xmesh: synthesis: shared domain insight back to mesh")
             }
 
