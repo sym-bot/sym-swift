@@ -109,7 +109,11 @@ public protocol SYMSynthesisDelegate: AnyObject {
 /// let node = SymNode(name: "my-agent")
 /// try await node.start()
 ///
-/// node.remember("race condition in order processing", tags: ["bug"])
+/// node.remember(fields: [
+///     .focus: CMBEncoder.encodeField("race condition in order processing"),
+///     .issue: CMBEncoder.encodeField("concurrent writes to order state"),
+///     .mood: CMBEncoder.encodeField("concerned"),
+/// ])
 /// let results = node.recall("order")
 ///
 /// node.on { event in
@@ -140,9 +144,11 @@ public final class SymNode {
     private let svafTemporalLambda: Float       // Weight of temporal drift in combined score (default 0.3)
     private let svafFreshnessSeconds: Float     // τ_freshness for temporal decay (default 1800 = 30min)
     private let svafFieldWeights: CMBFieldWeights  // Per-field α_f weights
+    private let retentionSeconds: TimeInterval    // How long to keep CMBs in local storage (default 86400 = 24h)
+    private var purgeTimer: Timer?
 
     private let identity: SymIdentity
-    private let store: SymMemoryStore
+    private let store: any CMBStore
     private let meshNode: MeshNode
     private let discovery: SymDiscovery
     private let logger: Logger
@@ -219,6 +225,11 @@ public final class SymNode {
     ///   - svafTemporalLambda: Weight of temporal drift in combined score (default 0.3).
     ///   - svafFreshnessSeconds: τ for temporal decay — signals older than this are stale (default 1800 = 30min).
     ///   - svafFieldWeights: Per-field α_f weights for SVAF evaluation (default: uniform).
+    ///   - retentionSeconds: How long to keep CMBs in local storage (default 86400 = 24h).
+    ///     Regulated domains MUST set this per compliance requirements:
+    ///     legal (per jurisdiction), health (HIPAA 6yr), finance (MiFID II 5yr, SEC 7yr).
+    ///   - store: Custom CMB storage implementation. Defaults to file-based storage.
+    ///     Pass a read-only CMBStore for audit agents that observe without modifying.
     ///   - stateSyncInterval: Seconds between state-sync broadcasts to peers (default 0, disabled).
     ///     Set to 1.0 for real-time neural coupling. 0 means state is only sent on handshake and re-encode.
     ///   - relay: WebSocket relay URL for internet-scale mesh (e.g. `wss://sym-relay.onrender.com`).
@@ -233,6 +244,8 @@ public final class SymNode {
         svafTemporalLambda: Float = 0.3,
         svafFreshnessSeconds: Float = 1800,
         svafFieldWeights: CMBFieldWeights = .uniform,
+        retentionSeconds: TimeInterval = 86400,
+        store: (any CMBStore)? = nil,
         stateSyncInterval: TimeInterval = 0,
         relay: URL? = nil,
         relayToken: String? = nil,
@@ -246,6 +259,7 @@ public final class SymNode {
         self.svafTemporalLambda = svafTemporalLambda
         self.svafFreshnessSeconds = svafFreshnessSeconds
         self.svafFieldWeights = svafFieldWeights
+        self.retentionSeconds = retentionSeconds
         self.stateSyncInterval = stateSyncInterval
         self.relayURL = relay
         self.relayToken = relayToken
@@ -254,7 +268,7 @@ public final class SymNode {
         self.logger = Logger(subsystem: "bot.sym", category: "SymNode.\(name)")
 
         let nodeDir = SymIdentityManager.nodeDirectory(for: name)
-        self.store = SymMemoryStore(nodeDir: nodeDir, sourceName: name)
+        self.store = store ?? SymMemoryStore(nodeDir: nodeDir, sourceName: name)
         self.meshNode = MeshNode(options: MeshNodeOptions(hiddenDim: ContextEncoder.dim))
         self.discovery = SymDiscovery(identity: identity)
 
@@ -324,6 +338,13 @@ public final class SymNode {
             }
         }
 
+        // Retention purge — run on start + every hour
+        store.purge(retentionSeconds: retentionSeconds)
+        purgeTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.store.purge(retentionSeconds: self.retentionSeconds)
+        }
+
         let relayInfo = relayURL != nil ? ", relay: \(relayURL!.absoluteString)" : ""
         logger.info("[SYM] node: started: \(self.name) (\(self.identity.nodeId.prefix(8))\(relayInfo))")
     }
@@ -337,6 +358,8 @@ public final class SymNode {
         encodeTimer = nil
         stateSyncTimer?.invalidate()
         stateSyncTimer = nil
+        purgeTimer?.invalidate()
+        purgeTimer = nil
 
         relaySession?.stop()
         relaySession = nil
@@ -372,43 +395,26 @@ public final class SymNode {
 
     // MARK: - Memory
 
-    /// Store a memory with LLM field extraction (async). Falls back to heuristic if LLM unavailable.
+    /// Store a memory with structured CAT7 fields.
+    /// The agent extracts fields — the protocol does not parse raw text.
+    /// Store a memory with structured CAT7 fields.
+    /// - Parameters:
+    ///   - fields: All 7 CAT7 fields (agent extracts these)
+    ///   - parents: Parent CMBs this is a remix of. Lineage computed automatically.
     @discardableResult
-    public func remember(_ content: String, tags: [String] = [], originTimestamp: UInt64? = nil) async -> SymMemoryEntry {
+    public func remember(fields: [CMBField: CMBFieldVector], tags: [String] = [], parents: [CognitiveMemoryBlock] = [], originTimestamp: UInt64? = nil) -> SymMemoryEntry {
         let ts = originTimestamp ?? UInt64(Date().timeIntervalSince1970 * 1000)
-        var cmb: CognitiveMemoryBlock
 
-        // Try LLM extraction first
-        if let extractor = fieldExtractor,
-           let llmFields = await extractor.extractFields(from: content, source: name) {
-            // Build CMB from LLM-extracted field texts
-            var fieldVectors: [CMBField: CMBFieldVector] = [:]
-            for (field, text) in llmFields {
-                let (h1, _) = ContextEncoder.encode(text)
-                fieldVectors[field] = CMBFieldVector(text: text, vector: h1)
-            }
-            cmb = CognitiveMemoryBlock(
-                fields: fieldVectors, source: name,
-                originTimestamp: ts, confidence: 0.95 // Higher confidence for LLM
-            )
-            logger.info("[SYM] memory: (LLM extraction): \"\(content.prefix(50))\"")
-        } else {
-            // Heuristic fallback
-            cmb = CMBEncoder.createCMB(content: content, source: name, tags: tags, originTimestamp: ts)
-            logger.info("[SYM] memory: (heuristic extraction): \"\(content.prefix(50))\"")
-        }
-
-        let entry = store.write(content: content, tags: tags, originTimestamp: originTimestamp, cmb: cmb)
-        return _afterRemember(entry)
-    }
-
-    /// Store a memory with heuristic field extraction (sync). Use async version when LLM is available.
-    @discardableResult
-    public func remember(_ content: String, tags: [String] = [], originTimestamp: UInt64? = nil) -> SymMemoryEntry {
-        let cmb = CMBEncoder.createCMB(
-            content: content, source: name, tags: tags,
-            originTimestamp: originTimestamp ?? UInt64(Date().timeIntervalSince1970 * 1000)
+        // Compute lineage from parents per MMP spec Section 14
+        let lineage: CMBLineage? = parents.isEmpty ? nil : CMBLineage(
+            parents: parents.map(\.key),
+            ancestors: parents.flatMap { ($0.lineage?.ancestors ?? []) + [$0.key] },
+            method: "SVAF-v2"
         )
+
+        let cmb = CMBEncoder.createCMB(fields: fields, source: name, originTimestamp: ts, lineage: lineage)
+        let content = CMBEncoder.renderContent(from: cmb)
+        logger.info("[SYM] remember: \"\(content.prefix(80))\"")
         let entry = store.write(content: content, tags: tags, originTimestamp: originTimestamp, cmb: cmb)
         return _afterRemember(entry)
     }

@@ -14,38 +14,12 @@ import os.log
 
 // MARK: - Memory Entry
 
-/// A single memory entry, serializable for storage and wire transfer.
-public struct SymMemoryEntry: Codable, Sendable {
-    public let key: String
-    public let content: String
-    public let source: String
-    public let tags: [String]
-    public let originTimestamp: UInt64   // When the event originally happened (L0 time)
-    public let storedAt: UInt64          // When this L1 entry was created
-    public let timestamp: UInt64         // Backward-compatible sort key (= storedAt)
-    public let cmb: CognitiveMemoryBlock?  // Per-field decomposition (SVAF v2)
-
-    public init(key: String = "memory-\(UInt64(Date().timeIntervalSince1970 * 1000))",
-                content: String,
-                source: String,
-                tags: [String] = [],
-                originTimestamp: UInt64? = nil,
-                storedAt: UInt64 = UInt64(Date().timeIntervalSince1970 * 1000),
-                cmb: CognitiveMemoryBlock? = nil) {
-        self.key = key
-        self.content = content
-        self.source = source
-        self.tags = tags
-        self.storedAt = storedAt
-        self.originTimestamp = originTimestamp ?? storedAt
-        self.timestamp = storedAt
-        self.cmb = cmb
-    }
-}
+/// Alias for backward compatibility — CMBStoreEntry is the canonical type.
+public typealias SymMemoryEntry = CMBStoreEntry
 
 // MARK: - Memory Store
 
-/// File-based memory store for a SymNode.
+/// SYM's default file-based CMB store.
 ///
 /// Layout:
 /// ```
@@ -55,7 +29,7 @@ public struct SymMemoryEntry: Codable, Sendable {
 ///   {peerId}/       ← peer memories (first 8 chars of peer nodeId)
 ///     {timestamp}.json
 /// ```
-final class SymMemoryStore {
+final class SymMemoryStore: CMBStore, @unchecked Sendable {
 
     private let memoriesDir: URL
     private let sourceName: String
@@ -74,17 +48,9 @@ final class SymMemoryStore {
 
     // MARK: - Write
 
-    /// Store a memory locally.
+    /// Store a CMB entry locally.
     @discardableResult
-    func write(content: String, tags: [String] = [], originTimestamp: UInt64? = nil, cmb: CognitiveMemoryBlock? = nil) -> SymMemoryEntry {
-        let entry = SymMemoryEntry(
-            content: content,
-            source: sourceName,
-            tags: tags,
-            originTimestamp: originTimestamp,
-            cmb: cmb
-        )
-
+    func write(entry: CMBStoreEntry) -> CMBStoreEntry? {
         let dir = memoriesDir.appendingPathComponent("local")
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
 
@@ -95,13 +61,27 @@ final class SymMemoryStore {
             try data.write(to: file)
         } catch {
             logger.error("[SYM] memory: write failed: \(error.localizedDescription)")
+            return nil
         }
 
         return entry
     }
 
-    /// Store a memory received from a peer.
-    func receiveFromPeer(peerId: String, entry: SymMemoryEntry) {
+    /// Convenience: create entry from components and write.
+    @discardableResult
+    func write(content: String, tags: [String] = [], originTimestamp: UInt64? = nil, cmb: CognitiveMemoryBlock? = nil) -> CMBStoreEntry {
+        let entry = CMBStoreEntry(
+            content: content,
+            source: sourceName,
+            tags: tags,
+            originTimestamp: originTimestamp,
+            cmb: cmb
+        )
+        return write(entry: entry) ?? entry
+    }
+
+    /// Store a CMB received from a peer.
+    func receiveFromPeer(peerId: String, entry: CMBStoreEntry) {
         let shortId = String(peerId.prefix(8))
         let dir = memoriesDir.appendingPathComponent(shortId)
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -141,7 +121,7 @@ final class SymMemoryStore {
             }
         }
 
-        return results.sorted { $0.timestamp > $1.timestamp }
+        return results.sorted { $0.storedAt > $1.storedAt }
     }
 
     // MARK: - Metadata
@@ -163,13 +143,16 @@ final class SymMemoryStore {
         let entries = allEntries().prefix(limit)
         return entries.compactMap { entry in
             if let cmb = entry.cmb { return cmb }
-            // On-demand extraction for legacy entries without CMBs
+            // Legacy entries without CMBs: create minimal anchor from content text
+            let fields: [CMBField: CMBFieldVector] = [
+                .focus: CMBEncoder.encodeField(String(entry.content.prefix(80))),
+                .mood: CMBEncoder.encodeField("neutral"),
+            ]
             return CMBEncoder.createCMB(
-                content: entry.content,
+                fields: fields,
                 source: entry.source,
-                tags: entry.tags,
                 originTimestamp: entry.originTimestamp,
-                confidence: 0.6  // Lower confidence for retroactive extraction
+                confidence: 0.5
             )
         }
     }
@@ -195,6 +178,51 @@ final class SymMemoryStore {
             }
         }
 
-        return entries.sorted { $0.timestamp > $1.timestamp }
+        return entries.sorted { $0.storedAt > $1.storedAt }
+    }
+
+    // MARK: - Retention
+
+    /// Purge CMBs older than retention period.
+    /// Preserves CMBs that are ancestors of newer CMBs (graph integrity).
+    func purge(retentionSeconds: TimeInterval) {
+        let cutoff = UInt64((Date().timeIntervalSince1970 - retentionSeconds) * 1000)
+
+        // Collect all ancestor keys from non-expired entries to protect graph integrity
+        let allCurrent = allEntries()
+        var protectedKeys = Set<String>()
+        for entry in allCurrent where entry.storedAt >= cutoff {
+            if let ancestors = entry.cmb?.lineage?.ancestors {
+                protectedKeys.formUnion(ancestors)
+            }
+            if let parents = entry.cmb?.lineage?.parents {
+                protectedKeys.formUnion(parents)
+            }
+        }
+
+        guard fileManager.fileExists(atPath: memoriesDir.path) else { return }
+        let subdirs = (try? fileManager.contentsOfDirectory(at: memoriesDir, includingPropertiesForKeys: nil))?.filter(\.hasDirectoryPath) ?? []
+
+        var purged = 0
+        for subdir in subdirs {
+            let files = (try? fileManager.contentsOfDirectory(at: subdir, includingPropertiesForKeys: nil))?.filter { $0.pathExtension == "json" } ?? []
+
+            for file in files {
+                guard let data = try? Data(contentsOf: file),
+                      let entry = try? JSONDecoder().decode(SymMemoryEntry.self, from: data) else { continue }
+
+                guard entry.storedAt < cutoff else { continue }
+
+                // Protect CMBs referenced by newer entries' lineage
+                if let key = entry.cmb?.key, protectedKeys.contains(key) { continue }
+
+                try? fileManager.removeItem(at: file)
+                purged += 1
+            }
+        }
+
+        if purged > 0 {
+            logger.info("[SYM] memory: purged \(purged) expired CMBs (retention: \(Int(retentionSeconds))s)")
+        }
     }
 }
