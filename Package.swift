@@ -16,15 +16,15 @@ let package = Package(
             targets: ["SYM"]
         ),
     ],
-    dependencies: [
-        .package(path: "../sym-core-swift"),
-    ],
     targets: [
+        .binaryTarget(
+            name: "SYMCore",
+            url: "https://github.com/sym-bot/sym-swift/releases/download/0.2.0/SYMCore.xcframework.zip",
+            checksum: "4f332eacc0ea97a375ae220adbc7806229a330ec916426eccc81a0811360c667"
+        ),
         .target(
             name: "SYM",
-            dependencies: [
-                .product(name: "SYMCore", package: "sym-core-swift"),
-            ],
+            dependencies: ["SYMCore"],
             path: "Sources/SYM"
         ),
         .testTarget(
