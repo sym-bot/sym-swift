@@ -44,16 +44,23 @@ Each agent contributes its domain signal. The mesh connects them. Every agent ge
 
 ### 1. Add the package
 
-In Xcode: File → Add Package Dependencies → enter this URL:
+In Xcode:
 
-```
-https://github.com/sym-bot/sym-swift.git
-```
+1. **File → Add Package Dependencies** → enter `https://github.com/sym-bot/sym-swift.git` → Add Package
+2. When prompted to choose products, select **SYM** → Add to your app target
+3. Your target → **General → Frameworks, Libraries, and Embedded Content** → verify **SYM** appears in the list
 
 Or in Package.swift:
 
 ```swift
-.package(url: "https://github.com/sym-bot/sym-swift.git", from: "0.2.6")
+dependencies: [
+    .package(url: "https://github.com/sym-bot/sym-swift.git", from: "0.2.6")
+],
+targets: [
+    .target(name: "YourApp", dependencies: [
+        .product(name: "SYM", package: "sym-swift"),
+    ])
+]
 ```
 
 ### 2. Add network permissions
