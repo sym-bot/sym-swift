@@ -1,0 +1,294 @@
+// swift-interface-format-version: 1.0
+// swift-compiler-version: Apple Swift version 6.2.4 effective-5.10 (swiftlang-6.2.4.1.4 clang-1700.6.4.2)
+// swift-module-flags: -target arm64-apple-macosx14.0 -enable-objc-interop -enable-library-evolution -swift-version 5 -O -module-name SYMCore -package-name sym_core
+// swift-module-flags-ignorable:  -formal-cxx-interoperability-mode=off -interface-compiler-version 6.2.4
+import Foundation
+import Swift
+import _Concurrency
+import _StringProcessing
+import _SwiftConcurrencyShims
+public enum CMBField : Swift.String, Swift.Codable, Swift.CaseIterable, Swift.Sendable {
+  case activity
+  case energy
+  case mood
+  case intent
+  case context
+  case domain
+  case urgency
+  #if compiler(>=5.3) && $NonescapableTypes
+  public init?(rawValue: Swift.String)
+  #endif
+  public typealias AllCases = [SYMCore.CMBField]
+  public typealias RawValue = Swift.String
+  nonisolated public static var allCases: [SYMCore.CMBField] {
+    get
+  }
+  public var rawValue: Swift.String {
+    get
+  }
+}
+public protocol CMBFieldExtractor : AnyObject {
+  #if compiler(>=5.3) && $NonescapableTypes
+  func extractFields(from text: Swift.String, source: Swift.String) async -> [SYMCore.CMBField : Swift.String]?
+  #endif
+}
+public struct CMBFieldVector : Swift.Codable, Swift.Sendable {
+  public let text: Swift.String
+  public let vector: [Swift.Float]
+  public init(text: Swift.String, vector: [Swift.Float])
+  public func encode(to encoder: any Swift.Encoder) throws
+  public init(from decoder: any Swift.Decoder) throws
+}
+public struct CognitiveMemoryBlock : Swift.Codable, Swift.Sendable {
+  public let id: Swift.String
+  public let fields: [SYMCore.CMBField : SYMCore.CMBFieldVector]
+  public let source: Swift.String
+  public let originTimestamp: Swift.UInt64
+  public let storedAt: Swift.UInt64
+  public let confidence: Swift.Float
+  public let provenance: SYMCore.CMBProvenance?
+  #if compiler(>=5.3) && $NonescapableTypes
+  public init(id: Swift.String = "cmb-\(UUID().uuidString.prefix(8))", fields: [SYMCore.CMBField : SYMCore.CMBFieldVector], source: Swift.String, originTimestamp: Swift.UInt64 = UInt64(Date().timeIntervalSince1970 * 1000), storedAt: Swift.UInt64 = UInt64(Date().timeIntervalSince1970 * 1000), confidence: Swift.Float = 0.8, provenance: SYMCore.CMBProvenance? = nil)
+  #endif
+  public func encode(to encoder: any Swift.Encoder) throws
+  public init(from decoder: any Swift.Decoder) throws
+}
+public struct CMBProvenance : Swift.Codable, Swift.Sendable {
+  public let fusedFrom: [Swift.String]
+  public let fusionWeights: [SYMCore.CMBField : [Swift.Float]]
+  public let fieldDrift: [SYMCore.CMBField : Swift.Float]
+  public let totalDrift: Swift.Float
+  public let temporalDrift: Swift.Float
+  public let fusionMethod: Swift.String
+  public let fusedAt: Swift.UInt64
+  public init(fusedFrom: [Swift.String], fusionWeights: [SYMCore.CMBField : [Swift.Float]], fieldDrift: [SYMCore.CMBField : Swift.Float], totalDrift: Swift.Float, temporalDrift: Swift.Float, fusionMethod: Swift.String = "svaf-v2", fusedAt: Swift.UInt64 = UInt64(Date().timeIntervalSince1970 * 1000))
+  public func encode(to encoder: any Swift.Encoder) throws
+  public init(from decoder: any Swift.Decoder) throws
+}
+public struct CMBFieldWeights : Swift.Sendable {
+  public let weights: [SYMCore.CMBField : Swift.Float]
+  public init(_ weights: [SYMCore.CMBField : Swift.Float])
+  public subscript(field: SYMCore.CMBField) -> Swift.Float {
+    get
+  }
+  public static let codingAgent: SYMCore.CMBFieldWeights
+  public static let musicAgent: SYMCore.CMBFieldWeights
+  public static let fitnessAgent: SYMCore.CMBFieldWeights
+  public static let messagingAgent: SYMCore.CMBFieldWeights
+  public static let knowledgeAgent: SYMCore.CMBFieldWeights
+  public static let uniform: SYMCore.CMBFieldWeights
+}
+public enum CMBEncoder {
+  public static let fieldDim: Swift.Int
+  public static func createCMB(content: Swift.String, source: Swift.String, tags: [Swift.String] = [], originTimestamp: Swift.UInt64 = UInt64(Date().timeIntervalSince1970 * 1000), confidence: Swift.Float = 0.8) -> SYMCore.CognitiveMemoryBlock
+  public static func extractFields(content: Swift.String, tags: [Swift.String], source: Swift.String) -> [SYMCore.CMBField : SYMCore.CMBFieldVector]
+  public static func renderContent(from cmb: SYMCore.CognitiveMemoryBlock) -> Swift.String
+  public static func cosineSimilarity(_ a: [Swift.Float], _ b: [Swift.Float]) -> Swift.Float
+  public static func l2Normalize(_ v: [Swift.Float]) -> [Swift.Float]
+}
+public struct CfCHiddenState : Swift.Codable, Swift.Sendable {
+  public var h1: [Swift.Float]
+  public var h2: [Swift.Float]
+  public let hiddenDim: Swift.Int
+  public var lastUpdate: Foundation.Date
+  public init(h1: [Swift.Float], h2: [Swift.Float], lastUpdate: Foundation.Date = Date())
+  public init(hiddenDim: Swift.Int)
+  public mutating func reset()
+  public var timeSinceLastUpdate: Foundation.TimeInterval {
+    get
+  }
+  public func encode(to encoder: any Swift.Encoder) throws
+  public init(from decoder: any Swift.Decoder) throws
+}
+final public class CfCMeshCoupler {
+  public enum CouplingDecisionType : Swift.String, Swift.Sendable {
+    case aligned
+    case guarded
+    case rejected
+    #if compiler(>=5.3) && $NonescapableTypes
+    public init?(rawValue: Swift.String)
+    #endif
+    public typealias RawValue = Swift.String
+    public var rawValue: Swift.String {
+      get
+    }
+  }
+  public struct CouplingDecision : Swift.Sendable {
+    public let agentId: Swift.String
+    public let drift: Swift.Float
+    public let decision: SYMCore.CfCMeshCoupler.CouplingDecisionType
+    public let alpha: Swift.Float
+    public let weight: Swift.Float
+    public let timestamp: Foundation.Date
+  }
+  final public let config: SYMCore.CouplingConfig
+  final public var lastCouplingDecisions: [Swift.String : SYMCore.CfCMeshCoupler.CouplingDecision] {
+    get
+  }
+  public init(config: SYMCore.CouplingConfig = .default)
+  final public func updatePeer(agentId: Swift.String, hiddenState: SYMCore.CfCHiddenState, confidence: Swift.Float)
+  final public func removePeer(_ agentId: Swift.String)
+  final public func removeAllPeers()
+  final public var hasActivePeers: Swift.Bool {
+    get
+  }
+  final public var activePeerCount: Swift.Int {
+    get
+  }
+  final public func couple(local: SYMCore.CfCHiddenState) -> SYMCore.CfCHiddenState
+  #if compiler(>=5.3) && $NonescapableTypes
+  final public func l2Distance(local: SYMCore.CfCHiddenState) -> (h1Distance: Swift.Float, h2Distance: Swift.Float)?
+  #endif
+  #if compiler(>=5.3) && $NonescapableTypes
+  final public func coherence(local: SYMCore.CfCHiddenState) -> Swift.Float?
+  #endif
+  #if compiler(>=5.3) && $NonescapableTypes
+  final public func kuramotoOrderParameter(local: SYMCore.CfCHiddenState) -> Swift.Float?
+  #endif
+  @objc deinit
+}
+public typealias SemanticCoupler = SYMCore.CfCMeshCoupler
+public enum ContextEncoder {
+  public static let dim: Swift.Int
+  public static func encode(_ text: Swift.String) -> (h1: [Swift.Float], h2: [Swift.Float])
+}
+public struct CouplingConfig : Swift.Sendable {
+  public let driftThresholdAligned: Swift.Float
+  public let driftThresholdGuarded: Swift.Float
+  public let alphaAligned: Swift.Float
+  public let alphaGuarded: Swift.Float
+  public let temporalDecay: Swift.Float
+  public let peerRetentionSeconds: Foundation.TimeInterval
+  public static let `default`: SYMCore.CouplingConfig
+  public init(driftThresholdAligned: Swift.Float = 0.25, driftThresholdGuarded: Swift.Float = 0.5, alphaAligned: Swift.Float = 0.4, alphaGuarded: Swift.Float = 0.15, temporalDecay: Swift.Float = 0.05, peerRetentionSeconds: Foundation.TimeInterval = 300)
+}
+public struct NeuralCouplingConfig : Swift.Sendable {
+  public let base: SYMCore.CouplingConfig
+  public let tau: [Swift.Float]
+  public let couplingRate: Swift.Float
+  public init(tau: [Swift.Float], couplingRate: Swift.Float = 1.0, base: SYMCore.CouplingConfig = .default)
+}
+final public class KuramotoMetricsLogger {
+  public struct MetricEntry : Swift.Codable, Swift.Sendable {
+    public let timestamp: Foundation.TimeInterval
+    public let peerCount: Swift.Int
+    public let h1L2Distance: Swift.Float
+    public let h2L2Distance: Swift.Float
+    public let orderParameter: Swift.Float
+    public let effectiveAlpha: Swift.Float
+    public let decisions: [SYMCore.KuramotoMetricsLogger.PeerDecisionEntry]
+    public func encode(to encoder: any Swift.Encoder) throws
+    public init(from decoder: any Swift.Decoder) throws
+  }
+  public struct PeerDecisionEntry : Swift.Codable, Swift.Sendable {
+    public let agentId: Swift.String
+    public let drift: Swift.Float
+    public let decision: Swift.String
+    public let alpha: Swift.Float
+    public let weight: Swift.Float
+    public func encode(to encoder: any Swift.Encoder) throws
+    public init(from decoder: any Swift.Decoder) throws
+  }
+  public init(maxEntries: Swift.Int = 10_000, exportFileName: Swift.String = "kuramoto_metrics.jsonl")
+  #if compiler(>=5.3) && $NonescapableTypes
+  final public func log(peerCount: Swift.Int, l2Distances: (h1Distance: Swift.Float, h2Distance: Swift.Float)?, orderParameter: Swift.Float?, effectiveAlpha: Swift.Float, decisions: [Swift.String : SYMCore.CfCMeshCoupler.CouplingDecision])
+  #endif
+  final public func exportToFile() throws -> Foundation.URL
+  final public var entryCount: Swift.Int {
+    get
+  }
+  #if compiler(>=5.3) && $NonescapableTypes
+  final public var latestEntry: SYMCore.KuramotoMetricsLogger.MetricEntry? {
+    get
+  }
+  #endif
+  final public func clear()
+  @objc deinit
+}
+final public class MMPMeshNode {
+  final public let hiddenDim: Swift.Int
+  final public let couplingConfig: SYMCore.CouplingConfig
+  final public var isNeuralMode: Swift.Bool {
+    get
+  }
+  public init(hiddenDim: Swift.Int = 64, couplingConfig: SYMCore.CouplingConfig = .default)
+  public init(hiddenDim: Swift.Int = 64, neuralConfig: SYMCore.NeuralCouplingConfig)
+  final public func updateLocalState(_ h1: [Swift.Float], _ h2: [Swift.Float], confidence: Swift.Float = 0.5)
+  final public func coupledState() -> (h1: [Swift.Float], h2: [Swift.Float])
+  final public func addPeer(id: Swift.String, h1: [Swift.Float], h2: [Swift.Float], confidence: Swift.Float)
+  final public func removePeer(id: Swift.String)
+  final public func removeAllPeers()
+  final public var activePeerCount: Swift.Int {
+    get
+  }
+  final public var hasActivePeers: Swift.Bool {
+    get
+  }
+  final public var couplingDecisions: [Swift.String : SYMCore.CfCMeshCoupler.CouplingDecision] {
+    get
+  }
+  #if compiler(>=5.3) && $NonescapableTypes
+  final public var coherence: Swift.Float? {
+    get
+  }
+  #endif
+  #if compiler(>=5.3) && $NonescapableTypes
+  final public var kuramotoOrderParameter: Swift.Float? {
+    get
+  }
+  #endif
+  #if compiler(>=5.3) && $NonescapableTypes
+  final public var l2Distance: (h1Distance: Swift.Float, h2Distance: Swift.Float)? {
+    get
+  }
+  #endif
+  final public func exportMetrics() throws -> Foundation.URL
+  final public var metricsCount: Swift.Int {
+    get
+  }
+  @objc deinit
+}
+final public class NeuralCoupler {
+  final public let neuralConfig: SYMCore.NeuralCouplingConfig
+  final public var config: SYMCore.CouplingConfig {
+    get
+  }
+  final public var lastCouplingDecisions: [Swift.String : SYMCore.CfCMeshCoupler.CouplingDecision] {
+    get
+  }
+  public init(config: SYMCore.NeuralCouplingConfig)
+  final public func updatePeer(agentId: Swift.String, hiddenState: SYMCore.CfCHiddenState, confidence: Swift.Float)
+  final public func removePeer(_ agentId: Swift.String)
+  final public func removeAllPeers()
+  final public var hasActivePeers: Swift.Bool {
+    get
+  }
+  final public var activePeerCount: Swift.Int {
+    get
+  }
+  final public func couple(local: SYMCore.CfCHiddenState) -> SYMCore.CfCHiddenState
+  #if compiler(>=5.3) && $NonescapableTypes
+  final public func l2Distance(local: SYMCore.CfCHiddenState) -> (h1Distance: Swift.Float, h2Distance: Swift.Float)?
+  #endif
+  #if compiler(>=5.3) && $NonescapableTypes
+  final public func coherence(local: SYMCore.CfCHiddenState) -> Swift.Float?
+  #endif
+  @objc deinit
+}
+public struct SVAFResult {
+  public let decision: Swift.String
+  public let totalDrift: Swift.Float
+  public let temporalDrift: Swift.Float
+  public let fieldDrifts: [SYMCore.CMBField : Swift.Float]
+  public let fusedCMB: SYMCore.CognitiveMemoryBlock?
+  public let fusedContent: Swift.String?
+}
+public struct SVAFFusion {
+  public static func evaluate(incoming incomingCMB: SYMCore.CognitiveMemoryBlock, anchors: [SYMCore.CognitiveMemoryBlock], fieldWeights: [SYMCore.CMBField : Swift.Float], freshnessSeconds: Swift.Float, temporalLambda: Swift.Float, stableThreshold: Swift.Float, guardedThreshold: Swift.Float, now: Swift.UInt64, source: Swift.String, originTimestamp: Swift.UInt64, confidence: Swift.Float) -> SYMCore.SVAFResult
+}
+extension SYMCore.CMBField : Swift.Equatable {}
+extension SYMCore.CMBField : Swift.Hashable {}
+extension SYMCore.CMBField : Swift.RawRepresentable {}
+extension SYMCore.CfCMeshCoupler.CouplingDecisionType : Swift.Equatable {}
+extension SYMCore.CfCMeshCoupler.CouplingDecisionType : Swift.Hashable {}
+extension SYMCore.CfCMeshCoupler.CouplingDecisionType : Swift.RawRepresentable {}

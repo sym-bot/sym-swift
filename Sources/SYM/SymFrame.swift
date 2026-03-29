@@ -67,7 +67,7 @@ public enum SymFrameType: String, Codable, Sendable {
     /// Cognitive state vector broadcast for coupling evaluation. See MMP v0.2.0 Section 5.
     case stateSync = "state-sync"
     /// CMB memory share between peers. See MMP v0.2.0 Section 6.
-    case memoryShare = "memory-share"
+    case cmb = "cmb"
     /// Mood signal broadcast. Crosses domain boundaries per MMP v0.2.0 Section 9.3.
     case mood = "mood"
     /// Free-form text message between peers. See MMP v0.2.0 Section 7.
@@ -112,9 +112,9 @@ public struct SymFrame: Codable, Sendable {
     public var confidence: Float?
 
     // Memory share
-    /// Unique memory key (memory-share). See MMP v0.2.0 Section 6.
+    /// Unique memory key (cmb). See MMP v0.2.0 Section 6.
     public var key: String?
-    /// Memory content text (memory-share, message).
+    /// Memory content text (cmb, message).
     public var content: String?
     /// Source node name that created this memory.
     public var source: String?
@@ -191,9 +191,9 @@ public struct SymFrame: Codable, Sendable {
         return frame
     }
 
-    static func memoryShare(key: String, content: String, source: String, tags: [String],
-                            originTimestamp: UInt64, storedAt: UInt64) -> SymFrame {
-        var frame = SymFrame(type: .memoryShare)
+    static func cmb(key: String, content: String, source: String, tags: [String],
+                    originTimestamp: UInt64, storedAt: UInt64) -> SymFrame {
+        var frame = SymFrame(type: .cmb)
         frame.key = key
         frame.content = content
         frame.source = source

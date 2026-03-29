@@ -479,7 +479,7 @@ public final class SymNode {
         var shared = 0
         let currentPeers: [String: PeerState] = peerQueue.sync { self.peers }
 
-        let frame = SymFrame.memoryShare(
+        let frame = SymFrame.cmb(
             key: entry.key, content: entry.content,
             source: entry.source, tags: entry.tags,
             originTimestamp: entry.originTimestamp, storedAt: entry.storedAt
@@ -805,14 +805,14 @@ public final class SymNode {
                 }
             }
 
-        case .memoryShare:
+        case .cmb:
             guard let incomingCMB = frame.cmb else {
-                logger.warning("[SYM] memory-share: missing CMB in frame from \(peerName)")
+                logger.warning("[SYM] cmb: missing CMB in frame from \(peerName)")
                 break
             }
             let fieldCount = incomingCMB.fields.count
             let moodText = incomingCMB.fields[.mood]?.text ?? "none"
-            logger.info("[SYM] memory-share: received CMB \(incomingCMB.key.prefix(20)) from \(peerName) (\(fieldCount) fields, mood: \(moodText))")
+            logger.info("[SYM] cmb: received CMB \(incomingCMB.key.prefix(20)) from \(peerName) (\(fieldCount) fields, mood: \(moodText))")
             let content = CMBEncoder.renderContent(from: incomingCMB)
 
             // ── SVAF v2: Per-Field CMB Fusion ──────────────────────
