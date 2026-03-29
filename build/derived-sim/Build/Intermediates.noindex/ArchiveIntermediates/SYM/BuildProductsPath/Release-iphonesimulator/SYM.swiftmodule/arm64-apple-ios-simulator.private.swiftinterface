@@ -1,0 +1,181 @@
+// swift-interface-format-version: 1.0
+// swift-compiler-version: Apple Swift version 6.2.4 effective-5.10 (swiftlang-6.2.4.1.4 clang-1700.6.4.2)
+// swift-module-flags: -target arm64-apple-ios17.0-simulator -enable-objc-interop -enable-library-evolution -swift-version 5 -enforce-exclusivity=checked -O -enable-experimental-feature DebugDescriptionMacro -module-name SYM -package-name sym_swift
+// swift-module-flags-ignorable: -no-verify-emitted-module-interface -formal-cxx-interoperability-mode=off -interface-compiler-version 6.2.4
+import Foundation
+import Network
+@_exported import SYMCore
+import Swift
+import UIKit
+import _Concurrency
+import _StringProcessing
+import _SwiftConcurrencyShims
+import os.log
+import os
+public struct SymPeerGossip : Swift.Codable, Swift.Sendable {
+  public var nodeId: Swift.String?
+  public var name: Swift.String?
+  public var wakeChannel: SYM.SymWakeChannel?
+  #if compiler(>=5.3) && $NonescapableTypes
+  public init(nodeId: Swift.String? = nil, name: Swift.String? = nil, wakeChannel: SYM.SymWakeChannel? = nil)
+  #endif
+  public func encode(to encoder: any Swift.Encoder) throws
+  public init(from decoder: any Swift.Decoder) throws
+}
+public struct SymWakeChannel : Swift.Codable, Swift.Sendable {
+  public var platform: Swift.String?
+  public var token: Swift.String?
+  public var environment: Swift.String?
+  #if compiler(>=5.3) && $NonescapableTypes
+  public init(platform: Swift.String? = nil, token: Swift.String? = nil, environment: Swift.String? = nil)
+  #endif
+  public func encode(to encoder: any Swift.Encoder) throws
+  public init(from decoder: any Swift.Decoder) throws
+}
+public enum SymFrameType : Swift.String, Swift.Codable, Swift.Sendable {
+  case handshake
+  case stateSync
+  case memoryShare
+  case mood
+  case message
+  case wakeChannel
+  case wake
+  case xmeshInsight
+  case peerInfo
+  case ping
+  case pong
+  #if compiler(>=5.3) && $NonescapableTypes
+  public init?(rawValue: Swift.String)
+  #endif
+  public typealias RawValue = Swift.String
+  public var rawValue: Swift.String {
+    get
+  }
+}
+public struct SymFrame : Swift.Codable, Swift.Sendable {
+  public let type: SYM.SymFrameType
+  public var nodeId: Swift.String?
+  public var name: Swift.String?
+  public var h1: [Swift.Float]?
+  public var h2: [Swift.Float]?
+  public var confidence: Swift.Float?
+  public var key: Swift.String?
+  public var content: Swift.String?
+  public var source: Swift.String?
+  public var tags: [Swift.String]?
+  public var originTimestamp: Swift.UInt64?
+  public var storedAt: Swift.UInt64?
+  public var timestamp: Swift.UInt64?
+  public var mood: Swift.String?
+  public var context: Swift.String?
+  public var from: Swift.String?
+  public var fromName: Swift.String?
+  public var cmb: SYMCore.CognitiveMemoryBlock?
+  public var trajectory: [Swift.Float]?
+  public var patterns: [Swift.Float]?
+  public var anomaly: Swift.Float?
+  public var outcome: Swift.String?
+  public var coherence: Swift.Float?
+  public var platform: Swift.String?
+  public var token: Swift.String?
+  public var environment: Swift.String?
+  public var reason: Swift.String?
+  public var peers: [SYM.SymPeerGossip]?
+  public init(type: SYM.SymFrameType)
+  public func encode(to encoder: any Swift.Encoder) throws
+  public init(from decoder: any Swift.Decoder) throws
+}
+public struct SymIdentity : Swift.Codable, Swift.Sendable {
+  public let nodeId: Swift.String
+  public let name: Swift.String
+  public let hostname: Swift.String
+  public let createdAt: Foundation.Date
+  public func encode(to encoder: any Swift.Encoder) throws
+  public init(from decoder: any Swift.Decoder) throws
+}
+public typealias SymMemoryEntry = SYMCore.CMBStoreEntry
+public enum SymEvent {
+  case peerJoined(nodeId: Swift.String, name: Swift.String)
+  case peerLeft(nodeId: Swift.String, name: Swift.String)
+  case couplingDecision(peer: Swift.String, decision: Swift.String, drift: Swift.Float)
+  case memoryReceived(from: Swift.String, content: Swift.String, decision: Swift.String?, cmb: SYMCore.CognitiveMemoryBlock?)
+  case moodAccepted(from: Swift.String, mood: Swift.String, drift: Swift.Float)
+  case moodRejected(from: Swift.String, mood: Swift.String, drift: Swift.Float)
+  case message(from: Swift.String, content: Swift.String)
+  case xmeshInsight(from: Swift.String, trajectory: [Swift.Float], patterns: [Swift.Float], anomaly: Swift.Float, outcome: Swift.String, coherence: Swift.Float)
+  case stateSyncReceived(from: Swift.String, h1: [Swift.Float], h2: [Swift.Float], confidence: Swift.Float)
+}
+public struct SymPeerInfo : Swift.Sendable {
+  public let id: Swift.String
+  public let name: Swift.String
+  public let connected: Swift.Bool
+  public let lastSeen: Foundation.Date
+  public let coupling: Swift.String
+  public let drift: Swift.Float?
+}
+public struct SymNodeStatus : Swift.Sendable {
+  public let name: Swift.String
+  public let nodeId: Swift.String
+  public let running: Swift.Bool
+  public let port: Swift.UInt16
+  public let relay: Swift.String?
+  public let relayConnected: Swift.Bool
+  public let peers: [SYM.SymPeerInfo]
+  public let peerCount: Swift.Int
+  public let memoryCount: Swift.Int
+  public let coherence: Swift.Float?
+}
+public struct XMeshInsight : Swift.Sendable {
+  public let trajectory: [Swift.Float]
+  public let patterns: [Swift.Float]
+  public let anomaly: Swift.Float
+  public let outcome: Swift.String
+  public let coherence: Swift.Float
+}
+public protocol SYMSynthesisDelegate : AnyObject {
+  #if compiler(>=5.3) && $NonescapableTypes
+  func synthesizeInsight(from insight: SYM.XMeshInsight) -> Swift.String?
+  #endif
+}
+final public class SymNode {
+  final public let name: Swift.String
+  weak final public var synthesisDelegate: (any SYM.SYMSynthesisDelegate)?
+  weak final public var fieldExtractor: (any SYMCore.CMBFieldExtractor)?
+  final public var isRunning: Swift.Bool {
+    get
+  }
+  #if compiler(>=5.3) && $NonescapableTypes
+  public init(name: Swift.String, cognitiveProfile: Swift.String? = nil, moodThreshold: Swift.Float = 0.8, svafStableThreshold: Swift.Float = 0.25, svafGuardedThreshold: Swift.Float = 0.5, svafTemporalLambda: Swift.Float = 0.3, svafFreshnessSeconds: Swift.Float = 1800, svafFieldWeights: SYMCore.CMBFieldWeights = .uniform, retentionSeconds: Foundation.TimeInterval = 86400, store: (any SYMCore.CMBStore)? = nil, stateSyncInterval: Foundation.TimeInterval = 0, relay: Foundation.URL? = nil, relayToken: Swift.String? = nil, relayOnly: Swift.Bool = false)
+  #endif
+  final public func start()
+  final public func stop()
+  final public func on(_ handler: @escaping (SYM.SymEvent) -> Swift.Void)
+  #if compiler(>=5.3) && $NonescapableTypes
+  @discardableResult
+  final public func remember(fields: [SYMCore.CMBField : SYMCore.CMBFieldVector], tags: [Swift.String] = [], parents: [SYMCore.CognitiveMemoryBlock] = [], originTimestamp: Swift.UInt64? = nil) -> SYM.SymMemoryEntry
+  #endif
+  final public func recall(_ query: Swift.String) -> [SYM.SymMemoryEntry]
+  final public func broadcastCurrentState()
+  #if compiler(>=5.3) && $NonescapableTypes
+  final public func broadcastMood(_ mood: Swift.String, context: Swift.String? = nil)
+  #endif
+  final public func setWakeToken(platform: Swift.String, token: Swift.String, environment: Swift.String = "production")
+  final public func reconnect()
+  #if compiler(>=5.3) && $NonescapableTypes
+  final public func send(_ message: Swift.String, to peerId: Swift.String? = nil)
+  #endif
+  final public func peerList() -> [SYM.SymPeerInfo]
+  final public var memoryCount: Swift.Int {
+    get
+  }
+  #if compiler(>=5.3) && $NonescapableTypes
+  final public var coherence: Swift.Float? {
+    get
+  }
+  #endif
+  final public func status() -> SYM.SymNodeStatus
+  @objc deinit
+}
+extension SYM.SymFrameType : Swift.Equatable {}
+extension SYM.SymFrameType : Swift.Hashable {}
+extension SYM.SymFrameType : Swift.RawRepresentable {}

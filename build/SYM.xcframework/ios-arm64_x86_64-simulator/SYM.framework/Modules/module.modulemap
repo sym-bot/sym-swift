@@ -1,0 +1,8 @@
+framework module SYM {
+  header "SYM-Swift.h"
+  export *
+}
+
+module SYMCore {
+  export *
+}

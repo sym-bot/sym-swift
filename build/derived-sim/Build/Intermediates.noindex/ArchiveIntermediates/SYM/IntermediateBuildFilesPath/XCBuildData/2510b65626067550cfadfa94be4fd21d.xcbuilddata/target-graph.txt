@@ -1,0 +1,9 @@
+Target dependency graph (4 targets)
+Target 'SYM' in project 'SYM'
+➜ Explicit dependency on target 'SYM' in project 'SYM'
+➜ Explicit dependency on target 'SYMCore' in project 'SYMCore'
+Target 'SYM' in project 'SYM'
+➜ Explicit dependency on target 'SYMCore' in project 'SYMCore'
+Target 'SYMCore' in project 'SYMCore'
+➜ Explicit dependency on target 'SYMCore' in project 'SYMCore'
+Target 'SYMCore' in project 'SYMCore' (no dependencies)

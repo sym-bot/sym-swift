@@ -138,7 +138,7 @@ public final class SymNode {
     private let cognitiveProfile: String?
     private let moodThreshold: Float
 
-    // SVAF parameters (paper Section 3.2-3.3)
+    // SVAF parameters (MMP v0.2.0 Section 9)
     private let svafStableThreshold: Float      // ≤ this: aligned (default 0.25)
     private let svafGuardedThreshold: Float     // ≤ this: guarded; > this: rejected (default 0.5)
     private let svafTemporalLambda: Float       // Weight of temporal drift in combined score (default 0.3)
@@ -161,7 +161,7 @@ public final class SymNode {
     private let stateQueue = DispatchQueue(label: "bot.sym.state", qos: .userInitiated)
 
     /// Inbound sessions awaiting handshake. Retained here to prevent ARC deallocation.
-    /// Access only via stateQueue.
+    /// Access only via peerQueue.
     private var pendingSessions: [ObjectIdentifier: SymPeerSession] = [:]
 
     /// Track last coupling decision per peer — only log/emit on change.
@@ -397,7 +397,6 @@ public final class SymNode {
 
     /// Store a memory with structured CAT7 fields.
     /// The agent extracts fields — the protocol does not parse raw text.
-    /// Store a memory with structured CAT7 fields.
     /// - Parameters:
     ///   - fields: All 7 CAT7 fields (agent extracts these)
     ///   - parents: Parent CMBs this is a remix of. Lineage computed automatically.
@@ -747,7 +746,7 @@ public final class SymNode {
             let content = CMBEncoder.renderContent(from: incomingCMB)
 
             // ── SVAF v2: Per-Field CMB Fusion ──────────────────────
-            // Paper: λ_j = α_f · cos(x_new, x_j) · g(l_j) · exp(-λ(t_now - t_j)) · c_j
+            // MMP v0.2.0 Section 9: λ_j = α_f · cos(x_new, x_j) · g(l_j) · exp(-λ(t_now - t_j)) · c_j
             // Per-field drift evaluation + field-wise weighted fusion → NEW synthesized memory
 
             let now = UInt64(Date().timeIntervalSince1970 * 1000)
@@ -760,7 +759,7 @@ public final class SymNode {
             // 1. Get anchor CMBs from local memory
             let anchors = store.recentCMBs(limit: 5)
 
-            // 3. Per-field drift evaluation and fusion
+            // 2. Per-field drift evaluation and fusion
             var fieldDrifts: [CMBField: Float] = [:]
             var fusedFields: [CMBField: CMBFieldVector] = [:]
             var anchorWeightsLog: [CMBField: [Float]] = [:]
@@ -801,7 +800,8 @@ public final class SymNode {
                 anchorWeightsLog[field] = fieldAnchorWeights
 
                 // Synthesize field text
-                let fusedText = incomingField.text  // v1: keep incoming text (v2: LLM synthesis)
+                // TODO: v2 — LLM synthesis of field text
+                let fusedText = incomingField.text
                 fusedFields[field] = CMBFieldVector(text: fusedText, vector: fused)
             }
 
@@ -939,7 +939,11 @@ public final class SymNode {
 
         case .wakeChannel:
             // Peer declared their wake channel — store it (survives disconnect)
-            if let platform = frame.platform, let _ = frame.token {
+            if let platform = frame.platform, let token = frame.token {
+                let wc = SymWakeChannel(platform: platform, token: token, environment: frame.environment)
+                stateQueue.async { [weak self] in
+                    self?.peerWakeChannels[nodeId] = wc
+                }
                 logger.info("[SYM] wake: from \(peerName): \(platform)")
             }
 

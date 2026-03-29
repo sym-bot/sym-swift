@@ -1,0 +1,27 @@
+{
+  "object" : {
+    "artifacts" : [
+
+    ],
+    "dependencies" : [
+      {
+        "basedOn" : null,
+        "packageRef" : {
+          "identity" : "sym-core-swift",
+          "kind" : "fileSystem",
+          "location" : "/Users/hongwei/Documents/dev/sym-core-swift",
+          "name" : "SYMCore"
+        },
+        "state" : {
+          "name" : "fileSystem",
+          "path" : "/Users/hongwei/Documents/dev/sym-core-swift"
+        },
+        "subpath" : "sym-core-swift"
+      }
+    ],
+    "prebuilts" : [
+
+    ]
+  },
+  "version" : 7
+}

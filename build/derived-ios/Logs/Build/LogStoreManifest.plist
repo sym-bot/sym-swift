@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>logFormatVersion</key>
+	<integer>12</integer>
+	<key>logs</key>
+	<dict>
+		<key>DEF1FBF5-6689-498D-A0F3-A5951EA5F425</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>DEF1FBF5-6689-498D-A0F3-A5951EA5F425.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>W</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>0</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>2</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>sym-swift</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>SYM</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Archiving workspace sym-swift with scheme SYM</string>
+			<key>timeStartedRecording</key>
+			<real>796471465.27872002</real>
+			<key>timeStoppedRecording</key>
+			<real>796471471.18678796</real>
+			<key>title</key>
+			<string>Archiving workspace sym-swift with scheme SYM</string>
+			<key>uniqueIdentifier</key>
+			<string>DEF1FBF5-6689-498D-A0F3-A5951EA5F425</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

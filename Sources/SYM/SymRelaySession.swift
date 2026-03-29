@@ -416,6 +416,8 @@ final class SymRelaySession {
         if let v = frame.source { dict["source"] = v }
         if let v = frame.tags { dict["tags"] = v }
         if let v = frame.timestamp { dict["timestamp"] = v }
+        if let v = frame.originTimestamp { dict["originTimestamp"] = v }
+        if let v = frame.storedAt { dict["storedAt"] = v }
         if let v = frame.mood { dict["mood"] = v }
         if let v = frame.context { dict["context"] = v }
         if let v = frame.from { dict["from"] = v }
@@ -424,6 +426,17 @@ final class SymRelaySession {
         if let v = frame.token { dict["token"] = v }
         if let v = frame.environment { dict["environment"] = v }
         if let v = frame.reason { dict["reason"] = v }
+        if let v = frame.trajectory { dict["trajectory"] = v.map { Double($0) } }
+        if let v = frame.patterns { dict["patterns"] = v.map { Double($0) } }
+        if let v = frame.anomaly { dict["anomaly"] = Double(v) }
+        if let v = frame.outcome { dict["outcome"] = v }
+        if let v = frame.coherence { dict["coherence"] = Double(v) }
+
+        // CMB: encode as JSON data embedded in the dict
+        if let cmb = frame.cmb, let cmbData = try? JSONEncoder().encode(cmb),
+           let cmbDict = try? JSONSerialization.jsonObject(with: cmbData) as? [String: Any] {
+            dict["cmb"] = cmbDict
+        }
 
         return dict
     }
@@ -442,6 +455,8 @@ final class SymRelaySession {
         frame.source = dict["source"] as? String
         frame.tags = dict["tags"] as? [String]
         frame.timestamp = (dict["timestamp"] as? NSNumber).map { UInt64(truncating: $0) }
+        frame.originTimestamp = (dict["originTimestamp"] as? NSNumber).map { UInt64(truncating: $0) }
+        frame.storedAt = (dict["storedAt"] as? NSNumber).map { UInt64(truncating: $0) }
         frame.mood = dict["mood"] as? String
         frame.context = dict["context"] as? String
         frame.from = dict["from"] as? String
@@ -450,6 +465,9 @@ final class SymRelaySession {
         frame.token = dict["token"] as? String
         frame.environment = dict["environment"] as? String
         frame.reason = dict["reason"] as? String
+        frame.outcome = dict["outcome"] as? String
+        frame.anomaly = (dict["anomaly"] as? Double).map { Float($0) }
+        frame.coherence = (dict["coherence"] as? Double).map { Float($0) }
 
         // h1/h2 come as [Double] from JSON
         if let h1 = dict["h1"] as? [Double] { frame.h1 = h1.map { Float($0) } }
@@ -457,6 +475,20 @@ final class SymRelaySession {
 
         if let h2 = dict["h2"] as? [Double] { frame.h2 = h2.map { Float($0) } }
         else if let h2 = dict["h2"] as? [NSNumber] { frame.h2 = h2.map { Float(truncating: $0) } }
+
+        // trajectory/patterns come as [Double] from JSON
+        if let t = dict["trajectory"] as? [Double] { frame.trajectory = t.map { Float($0) } }
+        else if let t = dict["trajectory"] as? [NSNumber] { frame.trajectory = t.map { Float(truncating: $0) } }
+
+        if let p = dict["patterns"] as? [Double] { frame.patterns = p.map { Float($0) } }
+        else if let p = dict["patterns"] as? [NSNumber] { frame.patterns = p.map { Float(truncating: $0) } }
+
+        // CMB: decode from nested dict
+        if let cmbDict = dict["cmb"] as? [String: Any],
+           let cmbData = try? JSONSerialization.data(withJSONObject: cmbDict),
+           let cmb = try? JSONDecoder().decode(CognitiveMemoryBlock.self, from: cmbData) {
+            frame.cmb = cmb
+        }
 
         return frame
     }

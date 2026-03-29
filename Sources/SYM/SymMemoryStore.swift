@@ -51,20 +51,22 @@ final class SymMemoryStore: CMBStore, @unchecked Sendable {
     /// Store a CMB entry locally.
     @discardableResult
     func write(entry: CMBStoreEntry) -> CMBStoreEntry? {
-        let dir = memoriesDir.appendingPathComponent("local")
-        try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        ioQueue.sync {
+            let dir = memoriesDir.appendingPathComponent("local")
+            try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        let suffix = UUID().uuidString.prefix(8)
-        let file = dir.appendingPathComponent("\(entry.storedAt)-\(suffix).json")
-        do {
-            let data = try JSONEncoder().encode(entry)
-            try data.write(to: file)
-        } catch {
-            logger.error("[SYM] memory: write failed: \(error.localizedDescription)")
-            return nil
+            let suffix = UUID().uuidString.prefix(8)
+            let file = dir.appendingPathComponent("\(entry.storedAt)-\(suffix).json")
+            do {
+                let data = try JSONEncoder().encode(entry)
+                try data.write(to: file)
+            } catch {
+                logger.error("[SYM] memory: write failed: \(error.localizedDescription)")
+                return nil
+            }
+
+            return entry
         }
-
-        return entry
     }
 
     /// Convenience: create entry from components and write.
@@ -82,17 +84,19 @@ final class SymMemoryStore: CMBStore, @unchecked Sendable {
 
     /// Store a CMB received from a peer.
     func receiveFromPeer(peerId: String, entry: CMBStoreEntry) {
-        let shortId = String(peerId.prefix(8))
-        let dir = memoriesDir.appendingPathComponent(shortId)
-        try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        ioQueue.sync {
+            let shortId = String(peerId.prefix(8))
+            let dir = memoriesDir.appendingPathComponent(shortId)
+            try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        let suffix = UUID().uuidString.prefix(8)
-        let file = dir.appendingPathComponent("\(entry.storedAt)-\(suffix).json")
-        do {
-            let data = try JSONEncoder().encode(entry)
-            try data.write(to: file)
-        } catch {
-            logger.error("[SYM] memory: peer write failed: \(error.localizedDescription)")
+            let suffix = UUID().uuidString.prefix(8)
+            let file = dir.appendingPathComponent("\(entry.storedAt)-\(suffix).json")
+            do {
+                let data = try JSONEncoder().encode(entry)
+                try data.write(to: file)
+            } catch {
+                logger.error("[SYM] memory: peer write failed: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -100,28 +104,30 @@ final class SymMemoryStore: CMBStore, @unchecked Sendable {
 
     /// Search all memories (local + peer) by keyword.
     func search(query: String) -> [SymMemoryEntry] {
-        let q = query.lowercased()
-        var results: [SymMemoryEntry] = []
+        ioQueue.sync {
+            let q = query.lowercased()
+            var results: [SymMemoryEntry] = []
 
-        guard fileManager.fileExists(atPath: memoriesDir.path) else { return results }
+            guard fileManager.fileExists(atPath: memoriesDir.path) else { return results }
 
-        let subdirs = (try? fileManager.contentsOfDirectory(at: memoriesDir, includingPropertiesForKeys: nil))?.filter(\.hasDirectoryPath) ?? []
+            let subdirs = (try? fileManager.contentsOfDirectory(at: memoriesDir, includingPropertiesForKeys: nil))?.filter(\.hasDirectoryPath) ?? []
 
-        for subdir in subdirs {
-            let files = (try? fileManager.contentsOfDirectory(at: subdir, includingPropertiesForKeys: nil))?.filter { $0.pathExtension == "json" } ?? []
+            for subdir in subdirs {
+                let files = (try? fileManager.contentsOfDirectory(at: subdir, includingPropertiesForKeys: nil))?.filter { $0.pathExtension == "json" } ?? []
 
-            for file in files {
-                guard let data = try? Data(contentsOf: file),
-                      let entry = try? JSONDecoder().decode(SymMemoryEntry.self, from: data) else { continue }
+                for file in files {
+                    guard let data = try? Data(contentsOf: file),
+                          let entry = try? JSONDecoder().decode(SymMemoryEntry.self, from: data) else { continue }
 
-                let searchable = ([entry.content, entry.key] + entry.tags).joined(separator: " ").lowercased()
-                if searchable.contains(q) {
-                    results.append(entry)
+                    let searchable = ([entry.content, entry.key] + entry.tags).joined(separator: " ").lowercased()
+                    if searchable.contains(q) {
+                        results.append(entry)
+                    }
                 }
             }
-        }
 
-        return results.sorted { $0.storedAt > $1.storedAt }
+            return results.sorted { $0.storedAt > $1.storedAt }
+        }
     }
 
     // MARK: - Metadata
@@ -159,6 +165,79 @@ final class SymMemoryStore: CMBStore, @unchecked Sendable {
 
     /// All entries for context building (most recent 20).
     func allEntries() -> [SymMemoryEntry] {
+        ioQueue.sync {
+            var entries: [SymMemoryEntry] = []
+
+            guard fileManager.fileExists(atPath: memoriesDir.path) else { return entries }
+
+            let subdirs = (try? fileManager.contentsOfDirectory(at: memoriesDir, includingPropertiesForKeys: nil))?.filter(\.hasDirectoryPath) ?? []
+
+            for subdir in subdirs {
+                let files = (try? fileManager.contentsOfDirectory(at: subdir, includingPropertiesForKeys: nil))?
+                    .filter { $0.pathExtension == "json" }
+                    .suffix(10) ?? []
+
+                for file in files {
+                    if let data = try? Data(contentsOf: file),
+                       let entry = try? JSONDecoder().decode(SymMemoryEntry.self, from: data) {
+                        entries.append(entry)
+                    }
+                }
+            }
+
+            return entries.sorted { $0.storedAt > $1.storedAt }
+        }
+    }
+
+    // MARK: - Retention
+
+    /// Purge CMBs older than retention period.
+    /// Preserves CMBs that are ancestors of newer CMBs (graph integrity).
+    func purge(retentionSeconds: TimeInterval) {
+        ioQueue.sync {
+            let cutoff = UInt64((Date().timeIntervalSince1970 - retentionSeconds) * 1000)
+
+            // Collect all ancestor keys from non-expired entries to protect graph integrity
+            let allCurrent = _allEntriesUnlocked()
+            var protectedKeys = Set<String>()
+            for entry in allCurrent where entry.storedAt >= cutoff {
+                if let ancestors = entry.cmb?.lineage?.ancestors {
+                    protectedKeys.formUnion(ancestors)
+                }
+                if let parents = entry.cmb?.lineage?.parents {
+                    protectedKeys.formUnion(parents)
+                }
+            }
+
+            guard fileManager.fileExists(atPath: memoriesDir.path) else { return }
+            let subdirs = (try? fileManager.contentsOfDirectory(at: memoriesDir, includingPropertiesForKeys: nil))?.filter(\.hasDirectoryPath) ?? []
+
+            var purged = 0
+            for subdir in subdirs {
+                let files = (try? fileManager.contentsOfDirectory(at: subdir, includingPropertiesForKeys: nil))?.filter { $0.pathExtension == "json" } ?? []
+
+                for file in files {
+                    guard let data = try? Data(contentsOf: file),
+                          let entry = try? JSONDecoder().decode(SymMemoryEntry.self, from: data) else { continue }
+
+                    guard entry.storedAt < cutoff else { continue }
+
+                    // Protect CMBs referenced by newer entries' lineage
+                    if let key = entry.cmb?.key, protectedKeys.contains(key) { continue }
+
+                    try? fileManager.removeItem(at: file)
+                    purged += 1
+                }
+            }
+
+            if purged > 0 {
+                logger.info("[SYM] memory: purged \(purged) expired CMBs (retention: \(Int(retentionSeconds))s)")
+            }
+        }
+    }
+
+    /// Internal unlocked variant for use within ioQueue.sync blocks (avoids deadlock).
+    private func _allEntriesUnlocked() -> [SymMemoryEntry] {
         var entries: [SymMemoryEntry] = []
 
         guard fileManager.fileExists(atPath: memoriesDir.path) else { return entries }
@@ -179,50 +258,5 @@ final class SymMemoryStore: CMBStore, @unchecked Sendable {
         }
 
         return entries.sorted { $0.storedAt > $1.storedAt }
-    }
-
-    // MARK: - Retention
-
-    /// Purge CMBs older than retention period.
-    /// Preserves CMBs that are ancestors of newer CMBs (graph integrity).
-    func purge(retentionSeconds: TimeInterval) {
-        let cutoff = UInt64((Date().timeIntervalSince1970 - retentionSeconds) * 1000)
-
-        // Collect all ancestor keys from non-expired entries to protect graph integrity
-        let allCurrent = allEntries()
-        var protectedKeys = Set<String>()
-        for entry in allCurrent where entry.storedAt >= cutoff {
-            if let ancestors = entry.cmb?.lineage?.ancestors {
-                protectedKeys.formUnion(ancestors)
-            }
-            if let parents = entry.cmb?.lineage?.parents {
-                protectedKeys.formUnion(parents)
-            }
-        }
-
-        guard fileManager.fileExists(atPath: memoriesDir.path) else { return }
-        let subdirs = (try? fileManager.contentsOfDirectory(at: memoriesDir, includingPropertiesForKeys: nil))?.filter(\.hasDirectoryPath) ?? []
-
-        var purged = 0
-        for subdir in subdirs {
-            let files = (try? fileManager.contentsOfDirectory(at: subdir, includingPropertiesForKeys: nil))?.filter { $0.pathExtension == "json" } ?? []
-
-            for file in files {
-                guard let data = try? Data(contentsOf: file),
-                      let entry = try? JSONDecoder().decode(SymMemoryEntry.self, from: data) else { continue }
-
-                guard entry.storedAt < cutoff else { continue }
-
-                // Protect CMBs referenced by newer entries' lineage
-                if let key = entry.cmb?.key, protectedKeys.contains(key) { continue }
-
-                try? fileManager.removeItem(at: file)
-                purged += 1
-            }
-        }
-
-        if purged > 0 {
-            logger.info("[SYM] memory: purged \(purged) expired CMBs (retention: \(Int(retentionSeconds))s)")
-        }
     }
 }

@@ -1,0 +1,4 @@
+module SYMCore {
+header "SYMCore-Swift.h"
+export *
+}
