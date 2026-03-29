@@ -730,7 +730,14 @@ public final class SymNode {
             }
 
         case .memoryShare:
-            guard let content = frame.content else { break }
+            guard let incomingCMB = frame.cmb else {
+                logger.warning("[SYM] memory-share: missing CMB in frame from \(peerName)")
+                break
+            }
+            let fieldCount = incomingCMB.fields.count
+            let moodText = incomingCMB.fields[.mood]?.text ?? "none"
+            logger.info("[SYM] memory-share: received CMB \(incomingCMB.key.prefix(20)) from \(peerName) (\(fieldCount) fields, mood: \(moodText))")
+            let content = CMBEncoder.renderContent(from: incomingCMB)
 
             // ── SVAF v2: Per-Field CMB Fusion ──────────────────────
             // Paper: λ_j = α_f · cos(x_new, x_j) · g(l_j) · exp(-λ(t_now - t_j)) · c_j
@@ -743,18 +750,7 @@ public final class SymNode {
             let temporalDrift: Float = 1.0 - temporalDecay
             let confidence: Float = frame.confidence ?? 0.8
 
-            // 1. Extract CMB from incoming memory
-            let incomingCMB: CognitiveMemoryBlock
-            if let frameCMB = frame.cmb {
-                incomingCMB = frameCMB
-            } else {
-                incomingCMB = CMBEncoder.createCMB(
-                    content: content, source: frame.source ?? peerName,
-                    tags: frame.tags ?? [], originTimestamp: originTs, confidence: confidence
-                )
-            }
-
-            // 2. Get anchor CMBs from local memory
+            // 1. Get anchor CMBs from local memory
             let anchors = store.recentCMBs(limit: 5)
 
             // 3. Per-field drift evaluation and fusion

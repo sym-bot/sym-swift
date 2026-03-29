@@ -9,6 +9,7 @@
 //
 
 import Foundation
+import os.log
 
 // MARK: - Peer Gossip
 
@@ -195,6 +196,7 @@ final class SymFrameParser {
 
     private var buffer = Data()
     private static let maxFrameSize: UInt32 = 65536
+    private let logger = Logger(subsystem: "bot.sym", category: "FrameParser")
 
     /// Parse any complete frames from the accumulated buffer.
     func feed(_ data: Data) -> [SymFrame] {
@@ -206,7 +208,7 @@ final class SymFrameParser {
             let length = buffer.withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
 
             guard length > 0, length <= Self.maxFrameSize else {
-                // Invalid frame — clear buffer to recover
+                logger.error("[SYM] frame: invalid length \(length), clearing buffer")
                 buffer.removeAll()
                 break
             }
@@ -221,9 +223,8 @@ final class SymFrameParser {
                 let frame = try JSONDecoder().decode(SymFrame.self, from: jsonData)
                 frames.append(frame)
             } catch {
-                #if DEBUG
-                print("[SYM] frame: malformed JSON: \(error)")
-                #endif
+                let preview = String(data: jsonData.prefix(200), encoding: .utf8) ?? "binary"
+                logger.error("[SYM] frame: decode failed: \(error) — \(preview)")
             }
         }
 
