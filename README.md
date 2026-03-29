@@ -34,6 +34,12 @@ SYM gives you the infrastructure. You define what your agent knows:
 
 Each agent contributes its domain signal. The mesh connects them. Every agent gets smarter because yours joined.
 
+## Requirements
+
+- iOS 17+ / macOS 14+
+- Swift 5.9+
+- SYM source is open (Apache 2.0). SYMCore is distributed as a precompiled xcframework via SPM binary target — IP protected, no source access needed.
+
 ## Integration
 
 ### 1. Add the package
@@ -47,7 +53,7 @@ https://github.com/sym-bot/sym-swift.git
 Or in Package.swift:
 
 ```swift
-.package(url: "https://github.com/sym-bot/sym-swift.git", from: "0.1.0")
+.package(url: "https://github.com/sym-bot/sym-swift.git", from: "0.2.6")
 ```
 
 ### 2. Add network permissions
@@ -154,7 +160,7 @@ final class MeshService: ObservableObject {
             logger.info("[Mesh] message from \(from): \(content)")
             // Your domain logic — handle command
 
-        case .memoryReceived(_, let content, _):
+        case .memoryReceived(_, let content, _, let cmb):
             logger.info("[Mesh] insight: \(content)")
             // Your domain logic — act on collective intelligence
 
@@ -248,7 +254,7 @@ node.on { event in
     case .peerLeft(let id, let name): ...
     case .moodAccepted(let from, let mood, let drift): ...
     case .moodRejected(let from, let mood, let drift): ...
-    case .memoryReceived(let from, let content, let decision): ...
+    case .memoryReceived(let from, let content, let decision, let cmb): ...
     case .message(let from, let content): ...
     case .xmeshInsight(let from, let trajectory, let patterns, let anomaly, let outcome, let coherence): ...
     case .couplingDecision(let peer, let decision, let drift): ...
