@@ -720,7 +720,7 @@ public final class SymNode {
                     case .guarded:
                         context = "partially related context — sharing with caution"
                     case .rejected:
-                        context = "different cognitive domains — no memory sharing, mood still evaluated separately"
+                        context = "different cognitive domains — no state blending, CMB mood field still delivered (MMP v0.2.0 Section 9.3)"
                     @unknown default:
                         context = "unknown coupling state"
                     }
