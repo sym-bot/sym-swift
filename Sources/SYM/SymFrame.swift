@@ -57,6 +57,21 @@ public struct SymWakeChannel: Codable, Sendable {
     }
 }
 
+// MARK: - E2E Metadata
+
+/// E2E encryption metadata attached to encrypted CMB frames.
+/// Matches Node.js wire format: `_e2e: { nonce: "base64..." }`.
+public struct E2EMetadata: Codable, Sendable {
+    /// Base64-encoded 12-byte AES-GCM nonce/IV.
+    public var nonce: String
+
+    /// Create E2E metadata.
+    /// - Parameter nonce: Base64-encoded 12-byte nonce.
+    public init(nonce: String) {
+        self.nonce = nonce
+    }
+}
+
 // MARK: - Frame Types
 
 /// SYM wire message types. Must match Node.js SymNode exactly.
@@ -102,6 +117,9 @@ public struct SymFrame: Codable, Sendable {
     public var nodeId: String?
     /// Sender's display name (used in handshake).
     public var name: String?
+    /// Sender's E2E public key (base64, Curve25519 raw 32 bytes) for key agreement.
+    /// Present in handshake frames when E2E encryption is supported.
+    public var e2ePublicKey: String?
 
     // State sync
     /// CfC hidden state vector 1 (state-sync). See MMP v0.2.0 Section 5.
@@ -142,6 +160,26 @@ public struct SymFrame: Codable, Sendable {
     /// SVAF v2 Cognitive Memory Block. See MMP v0.2.0 Section 9.
     public var cmb: CognitiveMemoryBlock?
 
+    /// Encrypted CMB fields (base64 ciphertext with appended auth tag).
+    /// When present, `cmb.fields` is empty and must be decrypted using `_e2e.nonce`.
+    public var encryptedFields: String?
+    /// E2E encryption metadata for encrypted CMB frames.
+    /// Wire format: `_e2e: { nonce: "base64..." }`.
+    public var e2e: E2EMetadata?
+
+    private enum CodingKeys: String, CodingKey {
+        case type, nodeId, name, e2ePublicKey
+        case h1, h2, confidence
+        case key, content, source, tags, originTimestamp, storedAt, timestamp
+        case mood, context
+        case from, fromName
+        case cmb, encryptedFields
+        case e2e = "_e2e"
+        case trajectory, patterns, anomaly, outcome, coherence
+        case platform, token, environment, reason
+        case peers
+    }
+
     // xMesh insight (peer agent's cognitive state from its own LNN)
     /// LNN trajectory vector (xmesh-insight). See MMP v0.2.0 Section 12.
     public var trajectory: [Float]?
@@ -176,10 +214,11 @@ public struct SymFrame: Codable, Sendable {
 
     // MARK: - Factory Methods
 
-    static func handshake(nodeId: String, name: String) -> SymFrame {
+    static func handshake(nodeId: String, name: String, e2ePublicKey: String? = nil) -> SymFrame {
         var frame = SymFrame(type: .handshake)
         frame.nodeId = nodeId
         frame.name = name
+        frame.e2ePublicKey = e2ePublicKey
         return frame
     }
 

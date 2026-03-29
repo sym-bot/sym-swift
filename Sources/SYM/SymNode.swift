@@ -14,6 +14,7 @@
 //  Copyright (c) 2026 SYM.BOT Ltd. Apache 2.0 License.
 //
 
+import CryptoKit
 import Foundation
 import Network
 @_exported import SYMCore
@@ -189,6 +190,15 @@ public final class SymNode {
     private let discovery: SymDiscovery
     private let logger: Logger
 
+    // E2E encryption (Curve25519 + AES-256-GCM)
+    private let e2ePrivateKey: Curve25519.KeyAgreement.PrivateKey
+    private let e2ePublicKeyData: Data
+    /// Base64-encoded public key for handshake frames.
+    private let e2ePublicKeyB64: String
+    /// Per-peer shared secrets derived from ECDH. Keyed by peer nodeId.
+    /// Access only via peerQueue (same lock as peers dict).
+    private var peerSharedSecrets: [String: SymmetricKey] = [:]
+
     /// Active peer sessions keyed by nodeId. Access only via peerQueue.
     private var peers: [String: PeerState] = [:]
     private let peerQueue = DispatchQueue(label: "bot.sym.peers", qos: .userInitiated)
@@ -305,6 +315,12 @@ public final class SymNode {
         self.identity = SymIdentityManager.loadOrCreate(name: name)
         self.logger = Logger(subsystem: "bot.sym", category: "SymNode.\(name)")
 
+        // E2E encryption keypair — persisted alongside identity
+        let keyPair = SymIdentityManager.loadOrCreateE2EKeyPair(name: name)
+        self.e2ePrivateKey = keyPair.privateKey
+        self.e2ePublicKeyData = keyPair.publicKey
+        self.e2ePublicKeyB64 = keyPair.publicKey.base64EncodedString()
+
         let nodeDir = SymIdentityManager.nodeDirectory(for: name)
         self.store = store ?? SymMemoryStore(nodeDir: nodeDir, sourceName: name)
         self.meshNode = MeshNode(options: MeshNodeOptions(hiddenDim: ContextEncoder.dim))
@@ -407,6 +423,7 @@ public final class SymNode {
                 peer.session?.disconnect()
             }
             self.peers.removeAll()
+            self.peerSharedSecrets.removeAll()
         }
 
         if !relayOnly {
@@ -477,13 +494,17 @@ public final class SymNode {
         let decisions = meshNode.couplingDecisions
 
         var shared = 0
-        let currentPeers: [String: PeerState] = peerQueue.sync { self.peers }
+        let (currentPeers, currentSecrets): ([String: PeerState], [String: SymmetricKey]) = peerQueue.sync {
+            (self.peers, self.peerSharedSecrets)
+        }
 
-        let frame = SymFrame.cmb(
+        // Build base frame (plaintext — used for peers without E2E)
+        var baseFrame = SymFrame.cmb(
             key: entry.key, content: entry.content,
             source: entry.source, tags: entry.tags,
             originTimestamp: entry.originTimestamp, storedAt: entry.storedAt
         )
+        baseFrame.cmb = entry.cmb
 
         for (peerId, peer) in currentPeers {
             let d = decisions[peerId]
@@ -491,7 +512,24 @@ public final class SymNode {
                 logger.info("[SYM] memory: not sharing with \(peer.name) — rejected (drift: \(d.drift))")
                 continue
             }
-            sendToPeer(nodeId: peerId, frame: frame)
+
+            // Encrypt fields per-peer if shared secret exists
+            if let sharedSecret = currentSecrets[peerId],
+               let fields = entry.cmb?.fields,
+               let encrypted = E2ECrypto.encryptFields(fields, sharedSecret: sharedSecret) {
+                // Build encrypted frame: fields replaced with ciphertext, _e2e metadata added
+                var encFrame = baseFrame
+                encFrame.encryptedFields = encrypted.ciphertext
+                encFrame.e2e = E2EMetadata(nonce: encrypted.nonce)
+                // Clear the plaintext CMB from the encrypted frame — key/createdBy/createdAt/lineage stay on the outer frame
+                encFrame.cmb = nil
+                sendToPeer(nodeId: peerId, frame: encFrame)
+                logger.info("[SYM] e2e: encrypted CMB fields for \(peer.name)")
+            } else {
+                // Plaintext fallback for peers without E2E
+                sendToPeer(nodeId: peerId, frame: baseFrame)
+            }
+
             shared += 1
             if let d {
                 logger.info("[SYM] memory: shared with \(peer.name) — \(d.decision.rawValue) (drift: \(d.drift))")
@@ -677,8 +715,8 @@ public final class SymNode {
             return
         }
 
-        // Send handshake + cognitive state + wake channel
-        session.send(.handshake(nodeId: identity.nodeId, name: name))
+        // Send handshake (with E2E public key) + cognitive state + wake channel
+        session.send(.handshake(nodeId: identity.nodeId, name: name, e2ePublicKey: e2ePublicKeyB64))
 
         let (h1, h2) = meshNode.coupledState()
         session.send(.stateSync(h1: h1, h2: h2, confidence: 0.8))
@@ -713,8 +751,8 @@ public final class SymNode {
 
         guard added else { return }
 
-        // Send handshake + cognitive state + wake channel via relay
-        relaySession?.send(.handshake(nodeId: identity.nodeId, name: name), to: nodeId)
+        // Send handshake (with E2E public key) + cognitive state + wake channel via relay
+        relaySession?.send(.handshake(nodeId: identity.nodeId, name: name, e2ePublicKey: e2ePublicKeyB64), to: nodeId)
 
         let (h1, h2) = meshNode.coupledState()
         relaySession?.send(.stateSync(h1: h1, h2: h2, confidence: 0.8), to: nodeId)
@@ -758,7 +796,10 @@ public final class SymNode {
     }
 
     private func removePeer(nodeId: String) {
-        let peer: PeerState? = peerQueue.sync { self.peers.removeValue(forKey: nodeId) }
+        let peer: PeerState? = peerQueue.sync {
+            self.peerSharedSecrets.removeValue(forKey: nodeId)
+            return self.peers.removeValue(forKey: nodeId)
+        }
         meshNode.removePeer(id: nodeId)
         lastCouplingDecisions.removeValue(forKey: nodeId)
 
@@ -773,6 +814,19 @@ public final class SymNode {
 
         switch frame.type {
         case .handshake:
+            // Derive E2E shared secret if peer advertises a public key
+            if let peerPubKeyB64 = frame.e2ePublicKey,
+               let peerPubKeyData = Data(base64Encoded: peerPubKeyB64) {
+                if let sharedSecret = E2ECrypto.deriveSharedSecret(
+                    myPrivateKey: e2ePrivateKey,
+                    peerPublicKey: peerPubKeyData
+                ) {
+                    peerQueue.sync { self.peerSharedSecrets[nodeId] = sharedSecret }
+                    logger.info("[SYM] e2e: derived shared secret with \(peerName) (\(nodeId.prefix(8)))")
+                } else {
+                    logger.warning("[SYM] e2e: failed to derive shared secret with \(peerName)")
+                }
+            }
             break
 
         case .stateSync:
@@ -806,9 +860,42 @@ public final class SymNode {
             }
 
         case .cmb:
-            guard let incomingCMB = frame.cmb else {
-                logger.warning("[SYM] cmb: missing CMB in frame from \(peerName)")
-                break
+            // Detect encrypted CMB: encryptedFields present with _e2e nonce
+            var incomingCMB: CognitiveMemoryBlock
+            if let encryptedFields = frame.encryptedFields,
+               let e2eMeta = frame.e2e {
+                // Decrypt fields using peer's shared secret
+                let sharedSecret: SymmetricKey? = peerQueue.sync { self.peerSharedSecrets[nodeId] }
+                guard let sharedSecret else {
+                    logger.warning("[SYM] e2e: received encrypted CMB from \(peerName) but no shared secret — skipping")
+                    break
+                }
+                guard let decryptedFields = E2ECrypto.decryptFields(
+                    ciphertext: encryptedFields,
+                    nonce: e2eMeta.nonce,
+                    sharedSecret: sharedSecret
+                ) else {
+                    logger.error("[SYM] e2e: failed to decrypt CMB fields from \(peerName)")
+                    break
+                }
+                logger.info("[SYM] e2e: decrypted \(decryptedFields.count) CMB fields from \(peerName)")
+
+                // Reconstruct CMB with decrypted fields
+                incomingCMB = CognitiveMemoryBlock(
+                    key: frame.key ?? "cmb-\(UUID().uuidString.prefix(8))",
+                    fields: decryptedFields,
+                    source: frame.source ?? peerName,
+                    createdBy: frame.source ?? peerName,
+                    originTimestamp: frame.originTimestamp ?? frame.timestamp ?? UInt64(Date().timeIntervalSince1970 * 1000),
+                    storedAt: UInt64(Date().timeIntervalSince1970 * 1000),
+                    confidence: frame.confidence ?? 0.8
+                )
+            } else {
+                guard let plainCMB = frame.cmb else {
+                    logger.warning("[SYM] cmb: missing CMB in frame from \(peerName)")
+                    break
+                }
+                incomingCMB = plainCMB
             }
             let fieldCount = incomingCMB.fields.count
             let moodText = incomingCMB.fields[.mood]?.text ?? "none"

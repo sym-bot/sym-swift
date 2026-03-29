@@ -8,7 +8,9 @@
 //  Copyright (c) 2026 SYM.BOT Ltd. Apache 2.0 License.
 //
 
+import CryptoKit
 import Foundation
+import os.log
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -76,6 +78,46 @@ enum SymIdentityManager {
             base = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".sym")
         }
         return base.appendingPathComponent("nodes").appendingPathComponent(name)
+    }
+
+    // MARK: - E2E Keypair Persistence
+
+    private static let e2eLogger = Logger(subsystem: "bot.sym", category: "SymIdentity.E2E")
+
+    /// Load or create a Curve25519 key pair for E2E encryption.
+    ///
+    /// The private key is stored as raw bytes in `e2e-private-key.bin` alongside the identity file.
+    /// On first call, generates a new key pair and persists it. On subsequent calls, loads the
+    /// existing key pair from disk.
+    ///
+    /// - Parameter name: The node display name (determines the storage directory).
+    /// - Returns: A tuple of (privateKey, publicKey as raw 32-byte Data).
+    static func loadOrCreateE2EKeyPair(name: String) -> (privateKey: Curve25519.KeyAgreement.PrivateKey, publicKey: Data) {
+        let dir = nodeDirectory(for: name)
+        let keyPath = dir.appendingPathComponent("e2e-private-key.bin")
+
+        // Try loading existing key
+        if let rawKey = try? Data(contentsOf: keyPath),
+           let privateKey = try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: rawKey) {
+            let publicKey = privateKey.publicKey.rawRepresentation
+            e2eLogger.info("[SYM] e2e: loaded persisted key pair for \(name)")
+            return (privateKey, publicKey)
+        }
+
+        // Generate new key pair
+        let privateKey = Curve25519.KeyAgreement.PrivateKey()
+        let publicKey = privateKey.publicKey.rawRepresentation
+
+        // Persist private key
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try privateKey.rawRepresentation.write(to: keyPath)
+            e2eLogger.info("[SYM] e2e: generated and persisted new key pair for \(name)")
+        } catch {
+            e2eLogger.error("[SYM] e2e: failed to persist private key: \(error)")
+        }
+
+        return (privateKey, publicKey)
     }
 
     private static func hostname() -> String {
