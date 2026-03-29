@@ -19,7 +19,7 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "SYMCore",
-            url: "https://github.com/sym-bot/sym-swift/releases/download/0.2.0/SYMCore.xcframework.zip",
+            url: "https://github.com/sym-bot/sym-swift/releases/download/0.2.1/SYMCore.xcframework.zip",
             checksum: "1906e55fc20aa6675be10de5154ccd11e9b9a8ec07327380aeabd1c23efc8f12"
         ),
         .target(
