@@ -4,3 +4,4 @@ node_modules/
 DerivedData/
 *.xcodeproj
 .DS_Store
+build/

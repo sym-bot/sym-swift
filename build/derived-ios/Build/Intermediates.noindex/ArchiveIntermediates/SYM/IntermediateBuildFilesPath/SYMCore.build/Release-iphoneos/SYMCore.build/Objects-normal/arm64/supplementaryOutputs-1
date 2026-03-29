@@ -1,7 +1,0 @@
-{
-  "/Users/hongwei/Documents/dev/sym-core-swift/Sources/SYMCore/CMB/CMBField.swift" : {
-    "const-values" : "/Users/hongwei/Documents/dev/sym-swift/build/derived-ios/Build/Intermediates.noindex/ArchiveIntermediates/SYM/IntermediateBuildFilesPath/SYMCore.build/Release-iphoneos/SYMCore.build/Objects-normal/arm64/SYMCore-primary.swiftconstvalues",
-    "dependencies" : "/Users/hongwei/Documents/dev/sym-swift/build/derived-ios/Build/Intermediates.noindex/ArchiveIntermediates/SYM/IntermediateBuildFilesPath/SYMCore.build/Release-iphoneos/SYMCore.build/Objects-normal/arm64/SYMCore-primary.d",
-    "diagnostics" : "/Users/hongwei/Documents/dev/sym-swift/build/derived-ios/Build/Intermediates.noindex/ArchiveIntermediates/SYM/IntermediateBuildFilesPath/SYMCore.build/Release-iphoneos/SYMCore.build/Objects-normal/arm64/SYMCore-primary.dia"
-  }
-}

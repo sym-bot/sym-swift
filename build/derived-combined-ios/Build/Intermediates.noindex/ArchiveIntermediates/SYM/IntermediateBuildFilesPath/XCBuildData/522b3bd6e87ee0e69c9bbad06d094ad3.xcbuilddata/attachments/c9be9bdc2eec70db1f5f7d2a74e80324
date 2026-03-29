@@ -1,4 +1,0 @@
-module SYM {
-header "SYM-Swift.h"
-export *
-}

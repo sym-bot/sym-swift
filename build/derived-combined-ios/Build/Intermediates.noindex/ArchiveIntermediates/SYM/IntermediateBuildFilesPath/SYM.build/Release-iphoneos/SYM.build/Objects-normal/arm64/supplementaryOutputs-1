@@ -1,7 +1,0 @@
-{
-  "/Users/hongwei/Documents/dev/sym-swift/Sources/SYM/SymDiscovery.swift" : {
-    "const-values" : "/Users/hongwei/Documents/dev/sym-swift/build/derived-combined-ios/Build/Intermediates.noindex/ArchiveIntermediates/SYM/IntermediateBuildFilesPath/SYM.build/Release-iphoneos/SYM.build/Objects-normal/arm64/SYM-primary.swiftconstvalues",
-    "dependencies" : "/Users/hongwei/Documents/dev/sym-swift/build/derived-combined-ios/Build/Intermediates.noindex/ArchiveIntermediates/SYM/IntermediateBuildFilesPath/SYM.build/Release-iphoneos/SYM.build/Objects-normal/arm64/SYM-primary.d",
-    "diagnostics" : "/Users/hongwei/Documents/dev/sym-swift/build/derived-combined-ios/Build/Intermediates.noindex/ArchiveIntermediates/SYM/IntermediateBuildFilesPath/SYM.build/Release-iphoneos/SYM.build/Objects-normal/arm64/SYM-primary.dia"
-  }
-}
