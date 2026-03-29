@@ -26,7 +26,7 @@ public enum SymEvent {
     case peerJoined(nodeId: String, name: String)
     case peerLeft(nodeId: String, name: String)
     case couplingDecision(peer: String, decision: String, drift: Float)
-    case memoryReceived(from: String, content: String, decision: String?)
+    case memoryReceived(from: String, content: String, decision: String?, cmb: CognitiveMemoryBlock?)
     case moodAccepted(from: String, mood: String, drift: Float)
     case moodRejected(from: String, mood: String, drift: Float)
     case message(from: String, content: String)
@@ -819,6 +819,14 @@ public final class SymNode {
             if totalDrift > self.svafGuardedThreshold {
                 let fieldLog = fieldDrifts.map { "\($0.key.rawValue):\(String(format: "%.2f", $0.value))" }.joined(separator: " ")
                 logger.info("[SYM] memory: SVAF rejected from \(peerName) — drift \(String(format: "%.3f", totalDrift)) [\(fieldLog)] temporal:\(String(format: "%.2f", temporalDrift))")
+
+                // Mood crosses all domain boundaries (MMP spec).
+                // Even when the full CMB is rejected, mood-aware agents must
+                // still receive the mood field for autonomous processing.
+                if let moodField = incomingCMB.fields[.mood], moodField.text != "neutral" {
+                    logger.info("[SYM] memory: mood extracted from rejected CMB: \"\(moodField.text)\" from \(peerName)")
+                    emit(.memoryReceived(from: peerName, content: moodField.text, decision: "mood-only", cmb: incomingCMB))
+                }
                 break
             }
 
@@ -856,7 +864,7 @@ public final class SymNode {
             let fieldLog = fieldDrifts.sorted(by: { $0.key.rawValue < $1.key.rawValue })
                 .map { "\($0.key.rawValue):\(String(format: "%.2f", $0.value))" }.joined(separator: " ")
             logger.info("[SYM] memory: SVAF fused from \(peerName): \"\(fusedContent.prefix(50))\" [\(decision), drift:\(String(format: "%.3f", totalDrift)), fields: \(fieldLog), age:\(String(format: "%.0f", ageSeconds))s]")
-            emit(.memoryReceived(from: peerName, content: fusedContent, decision: decision))
+            emit(.memoryReceived(from: peerName, content: fusedContent, decision: decision, cmb: fusedCMB))
 
         case .mood:
             guard let mood = frame.mood else { break }
