@@ -14,11 +14,20 @@ import os.log
 // MARK: - Peer Gossip
 
 /// Gossip payload for peer-info frames — describes a known peer and its wake channel.
+/// See MMP v0.2.0 Section 5 (Connection) and Section 7 (Frame Types).
 public struct SymPeerGossip: Codable, Sendable {
+    /// Node ID of the gossiped peer.
     public var nodeId: String?
+    /// Display name of the gossiped peer.
     public var name: String?
+    /// Wake channel descriptor, if known, for P2P wake of this peer.
     public var wakeChannel: SymWakeChannel?
 
+    /// Create a gossip entry for a known peer.
+    /// - Parameters:
+    ///   - nodeId: The peer's node ID.
+    ///   - name: The peer's display name.
+    ///   - wakeChannel: The peer's wake channel, if known.
     public init(nodeId: String? = nil, name: String? = nil, wakeChannel: SymWakeChannel? = nil) {
         self.nodeId = nodeId
         self.name = name
@@ -27,11 +36,20 @@ public struct SymPeerGossip: Codable, Sendable {
 }
 
 /// Wake channel descriptor for a peer — platform, push token, environment.
+/// Used for P2P wake of sleeping mesh nodes. See MMP v0.2.0 Section 5.
 public struct SymWakeChannel: Codable, Sendable {
+    /// Push platform identifier (e.g. "apns", "fcm").
     public var platform: String?
+    /// Device push token string.
     public var token: String?
+    /// Push environment ("production" or "sandbox").
     public var environment: String?
 
+    /// Create a wake channel descriptor.
+    /// - Parameters:
+    ///   - platform: Push platform identifier.
+    ///   - token: Device push token string.
+    ///   - environment: Push environment. Defaults to nil.
     public init(platform: String? = nil, token: String? = nil, environment: String? = nil) {
         self.platform = platform
         self.token = token
@@ -42,17 +60,29 @@ public struct SymWakeChannel: Codable, Sendable {
 // MARK: - Frame Types
 
 /// SYM wire message types. Must match Node.js SymNode exactly.
+/// See MMP v0.2.0 Section 7 (Frame Types).
 public enum SymFrameType: String, Codable, Sendable {
+    /// Identity exchange on connection. See MMP v0.2.0 Section 5.
     case handshake = "handshake"
+    /// Cognitive state vector broadcast for coupling evaluation. See MMP v0.2.0 Section 5.
     case stateSync = "state-sync"
+    /// CMB memory share between peers. See MMP v0.2.0 Section 6.
     case memoryShare = "memory-share"
+    /// Mood signal broadcast. Crosses domain boundaries per MMP v0.2.0 Section 9.3.
     case mood = "mood"
+    /// Free-form text message between peers. See MMP v0.2.0 Section 7.
     case message = "message"
+    /// Declares this node's push token for P2P wake. See MMP v0.2.0 Section 5.
     case wakeChannel = "wake-channel"
+    /// P2P wake request sent out-of-band (handled by AppDelegate). See MMP v0.2.0 Section 5.
     case wake = "wake"
+    /// xMesh insight from a peer agent's LNN. See MMP v0.2.0 Section 12.
     case xmeshInsight = "xmesh-insight"
+    /// Peer gossip — known peers and their wake channels. See MMP v0.2.0 Section 5.
     case peerInfo = "peer-info"
+    /// Heartbeat ping. See MMP v0.2.0 Section 5.
     case ping = "ping"
+    /// Heartbeat pong response. See MMP v0.2.0 Section 5.
     case pong = "pong"
 }
 
@@ -64,53 +94,82 @@ public enum SymFrameType: String, Codable, Sendable {
 /// Same framing as Node.js SYM `frame-parser.js`.
 public struct SymFrame: Codable, Sendable {
 
+    /// The frame type discriminator. See MMP v0.2.0 Section 7.
     public let type: SymFrameType
 
     // Handshake
+    /// Sender's node ID (used in handshake). See MMP v0.2.0 Section 3.
     public var nodeId: String?
+    /// Sender's display name (used in handshake).
     public var name: String?
 
     // State sync
+    /// CfC hidden state vector 1 (state-sync). See MMP v0.2.0 Section 5.
     public var h1: [Float]?
+    /// CfC hidden state vector 2 (state-sync). See MMP v0.2.0 Section 5.
     public var h2: [Float]?
+    /// Confidence score for the state vectors (0-1).
     public var confidence: Float?
 
     // Memory share
+    /// Unique memory key (memory-share). See MMP v0.2.0 Section 6.
     public var key: String?
+    /// Memory content text (memory-share, message).
     public var content: String?
+    /// Source node name that created this memory.
     public var source: String?
+    /// Tags for search/filtering.
     public var tags: [String]?
-    public var originTimestamp: UInt64?  // When the event happened (L0 time)
-    public var storedAt: UInt64?         // When the L1 entry was created
-    public var timestamp: UInt64?        // Backward-compatible
+    /// When the original event happened (epoch ms, L0 time). See MMP v0.2.0 Section 6.
+    public var originTimestamp: UInt64?
+    /// When the memory entry was created (epoch ms, L1 time).
+    public var storedAt: UInt64?
+    /// Backward-compatible timestamp (epoch ms).
+    public var timestamp: UInt64?
 
     // Mood
+    /// Mood label (mood frame). See MMP v0.2.0 Section 9.3.
     public var mood: String?
+    /// Optional context describing the mood trigger.
     public var context: String?
 
     // Message
+    /// Sender's node ID (message frame).
     public var from: String?
+    /// Sender's display name (message frame).
     public var fromName: String?
 
-    // SVAF v2: Cognitive Memory Block
+    /// SVAF v2 Cognitive Memory Block. See MMP v0.2.0 Section 9.
     public var cmb: CognitiveMemoryBlock?
 
     // xMesh insight (peer agent's cognitive state from its own LNN)
+    /// LNN trajectory vector (xmesh-insight). See MMP v0.2.0 Section 12.
     public var trajectory: [Float]?
+    /// LNN pattern activations (xmesh-insight). See MMP v0.2.0 Section 12.
     public var patterns: [Float]?
+    /// Anomaly score 0-1 (xmesh-insight).
     public var anomaly: Float?
+    /// Predicted outcome label (xmesh-insight).
     public var outcome: String?
+    /// Mesh coherence score 0-1 (xmesh-insight).
     public var coherence: Float?
 
     // Wake
+    /// Push platform identifier (wake-channel, wake).
     public var platform: String?
+    /// Device push token (wake-channel).
     public var token: String?
+    /// Push environment: "production" or "sandbox" (wake-channel).
     public var environment: String?
+    /// Reason for a wake request (wake).
     public var reason: String?
 
     // Peer info (gossip)
+    /// Known peers for gossip (peer-info). See MMP v0.2.0 Section 5.
     public var peers: [SymPeerGossip]?
 
+    /// Create a frame with the given type. All other fields default to nil.
+    /// - Parameter type: The ``SymFrameType`` for this frame.
     public init(type: SymFrameType) {
         self.type = type
     }
@@ -191,7 +250,8 @@ extension SymFrame {
 // MARK: - Frame Parser
 
 /// Streaming parser for length-prefixed JSON frames.
-/// Feed raw TCP data, get parsed SymFrame callbacks.
+/// See MMP v0.2.0 Section 4 (Transport, Layer 1).
+/// Feed raw TCP data, get parsed ``SymFrame`` callbacks.
 final class SymFrameParser {
 
     private var buffer = Data()

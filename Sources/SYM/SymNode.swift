@@ -21,65 +21,97 @@ import os.log
 
 // MARK: - Events
 
-/// Events emitted by SymNode.
+/// Events emitted by ``SymNode`` during mesh operation.
+/// See MMP v0.2.0 Section 5 (Connection) and Section 13 (Application).
 public enum SymEvent {
+    /// A new peer has joined the mesh. See MMP v0.2.0 Section 5.
     case peerJoined(nodeId: String, name: String)
+    /// A peer has left the mesh. See MMP v0.2.0 Section 5.
     case peerLeft(nodeId: String, name: String)
+    /// The SVAF coupling engine made a decision about a peer. See MMP v0.2.0 Section 9.
     case couplingDecision(peer: String, decision: String, drift: Float)
+    /// A memory was received from a peer, possibly fused via SVAF. See MMP v0.2.0 Section 6 and Section 9.
     case memoryReceived(from: String, content: String, decision: String?, cmb: CognitiveMemoryBlock?)
+    /// A peer's mood signal was accepted (drift within threshold). See MMP v0.2.0 Section 9.3.
     case moodAccepted(from: String, mood: String, drift: Float)
+    /// A peer's mood signal was rejected (drift above threshold). See MMP v0.2.0 Section 9.3.
     case moodRejected(from: String, mood: String, drift: Float)
+    /// A text message was received from a peer. See MMP v0.2.0 Section 7.
     case message(from: String, content: String)
     /// xMesh insight received — a peer agent's cognitive state from its own LNN.
-    /// Contains trajectory, patterns, anomaly score, predicted outcome.
+    /// Contains trajectory, patterns, anomaly score, predicted outcome. See MMP v0.2.0 Section 12.
     case xmeshInsight(from: String, trajectory: [Float], patterns: [Float], anomaly: Float, outcome: String, coherence: Float)
     /// Peer's cognitive state received via state-sync frame.
-    /// h1/h2 are CfC hidden state vectors for neural coupling.
+    /// h1/h2 are CfC hidden state vectors for neural coupling. See MMP v0.2.0 Section 5.
     case stateSyncReceived(from: String, h1: [Float], h2: [Float], confidence: Float)
 }
 
 // MARK: - Peer Info
 
-/// Public peer information.
+/// Public information about a connected mesh peer.
+/// See MMP v0.2.0 Section 5 (Connection) and Section 9 (Coupling).
 public struct SymPeerInfo: Sendable {
+    /// Truncated node ID (first 8 characters).
     public let id: String
+    /// Display name of the peer.
     public let name: String
+    /// Whether the peer is currently connected.
     public let connected: Bool
+    /// Timestamp of the last received frame from this peer.
     public let lastSeen: Date
+    /// Current SVAF coupling decision: "aligned", "guarded", "rejected", or "pending".
     public let coupling: String
+    /// SVAF drift score (0 = identical, 1 = maximally divergent), or nil if not yet evaluated.
     public let drift: Float?
 }
 
 // MARK: - Node Status
 
-/// Full node status snapshot.
+/// Full node status snapshot. See MMP v0.2.0 Section 13 (Application).
 public struct SymNodeStatus: Sendable {
+    /// Display name of this node.
     public let name: String
+    /// Truncated node ID (first 8 characters). See MMP v0.2.0 Section 3.
     public let nodeId: String
+    /// Whether the node is currently running.
     public let running: Bool
+    /// Local Bonjour listening port (0 if relay-only).
     public let port: UInt16
+    /// Relay URL string, or nil if no relay configured.
     public let relay: String?
+    /// Whether the relay WebSocket is currently connected.
     public let relayConnected: Bool
+    /// Connected peers with coupling state.
     public let peers: [SymPeerInfo]
+    /// Number of currently connected peers.
     public let peerCount: Int
+    /// Total memory count across local and peer stores. See MMP v0.2.0 Section 6.
     public let memoryCount: Int
+    /// Mesh coherence score (0-1), or nil if no peers. See MMP v0.2.0 Section 9.
     public let coherence: Float?
 }
 
 // MARK: - xMesh Insight
 
 /// Output from a peer agent's xMesh LNN — cognitive state evolved from bidirectional CMB flows.
+/// See MMP v0.2.0 Section 12 (xMesh).
 public struct XMeshInsight: Sendable {
-    public let trajectory: [Float]   // [valence, arousal, v_vel, a_vel, stability, confidence]
-    public let patterns: [Float]     // 8 pattern activations
-    public let anomaly: Float        // 0-1 deviation score
-    public let outcome: String       // predicted outcome label
-    public let coherence: Float      // mesh coherence 0-1
+    /// Trajectory vector: [valence, arousal, v_vel, a_vel, stability, confidence].
+    public let trajectory: [Float]
+    /// 8 pattern activation values from the peer's LNN.
+    public let patterns: [Float]
+    /// Anomaly score (0-1) measuring deviation from expected cognitive state.
+    public let anomaly: Float
+    /// Predicted outcome label from the peer's LNN.
+    public let outcome: String
+    /// Mesh coherence score (0-1) across all peers in the mesh.
+    public let coherence: Float
 }
 
 // MARK: - Synthesis Delegate
 
 /// Protocol for agents to participate in the xMesh synthesis loop.
+/// See MMP v0.2.0 Section 12 (xMesh).
 ///
 /// When a peer's xMesh insight arrives, the agent processes it through its own
 /// domain intelligence and returns a domain-specific interpretation (new outbound CMB),
@@ -98,6 +130,9 @@ public struct XMeshInsight: Sendable {
 /// }
 /// ```
 public protocol SYMSynthesisDelegate: AnyObject {
+    /// Process a peer's xMesh insight through domain intelligence.
+    /// - Parameter insight: The peer's cognitive state from its LNN.
+    /// - Returns: A domain-specific interpretation string to share back to the mesh, or nil to skip.
     func synthesizeInsight(from insight: XMeshInsight) -> String?
 }
 
@@ -130,6 +165,7 @@ public final class SymNode {
 
     // MARK: - Properties
 
+    /// Display name of this node, used in handshake and peer identification. See MMP v0.2.0 Section 3.
     public let name: String
 
     /// Cognitive profile — declares what this agent understands.
@@ -170,12 +206,13 @@ public final class SymNode {
     /// Event handlers. Access only via stateQueue.
     private var eventHandlers: [(SymEvent) -> Void] = []
 
-    /// Synthesis delegate — agent processes peer xMesh insight through its own domain intelligence.
+    /// Synthesis delegate for the xMesh synthesis loop. See MMP v0.2.0 Section 12.
+    /// Agent processes peer xMesh insight through its own domain intelligence.
     /// Returns domain-specific insight as a new outbound CMB. SYM shares it back to mesh.
     public weak var synthesisDelegate: SYMSynthesisDelegate?
 
-    /// LLM field extractor — app provides LLM implementation for CMB field extraction.
-    /// Falls back to heuristic keyword extraction if nil or if extraction returns nil.
+    /// LLM field extractor for CMB field extraction. See MMP v0.2.0 Section 9.
+    /// App provides LLM implementation; falls back to heuristic keyword extraction if nil.
     public weak var fieldExtractor: CMBFieldExtractor?
 
     /// Periodic re-encode timer (30s — re-encodes context and broadcasts).
@@ -187,6 +224,7 @@ public final class SymNode {
     private let stateSyncInterval: TimeInterval
 
     private var _running = false
+    /// Whether this node is currently running (started and not stopped).
     public var isRunning: Bool { stateQueue.sync { _running } }
 
     // Relay
@@ -379,7 +417,10 @@ public final class SymNode {
 
     // MARK: - Event Handling
 
-    /// Register an event handler.
+    /// Register an event handler for mesh events. See MMP v0.2.0 Section 13.
+    ///
+    /// Multiple handlers can be registered; all are called for each event.
+    /// - Parameter handler: Closure invoked on each ``SymEvent``.
     public func on(_ handler: @escaping (SymEvent) -> Void) {
         stateQueue.async { [weak self] in
             self?.eventHandlers.append(handler)
@@ -395,11 +436,18 @@ public final class SymNode {
 
     // MARK: - Memory
 
-    /// Store a memory with structured CAT7 fields.
+    /// Store a memory with structured CAT7 fields and broadcast to coupled peers.
+    /// See MMP v0.2.0 Section 6 (Memory) and Section 14 (Remix).
+    ///
     /// The agent extracts fields — the protocol does not parse raw text.
+    /// After storing, re-encodes cognitive state and shares with peers based on SVAF coupling decisions.
+    ///
     /// - Parameters:
-    ///   - fields: All 7 CAT7 fields (agent extracts these)
-    ///   - parents: Parent CMBs this is a remix of. Lineage computed automatically.
+    ///   - fields: CAT7 field vectors (agent extracts these via ``CMBEncoder``).
+    ///   - tags: Optional tags for search/filtering.
+    ///   - parents: Parent CMBs this is a remix of. Lineage is computed automatically per Section 14.
+    ///   - originTimestamp: When the event happened (epoch ms). Defaults to now.
+    /// - Returns: The stored ``SymMemoryEntry``.
     @discardableResult
     public func remember(fields: [CMBField: CMBFieldVector], tags: [String] = [], parents: [CognitiveMemoryBlock] = [], originTimestamp: UInt64? = nil) -> SymMemoryEntry {
         let ts = originTimestamp ?? UInt64(Date().timeIntervalSince1970 * 1000)
@@ -454,7 +502,9 @@ public final class SymNode {
         return entry
     }
 
-    /// Search memories across local and peer stores.
+    /// Search memories across local and peer stores by keyword. See MMP v0.2.0 Section 6.
+    /// - Parameter query: Search keyword matched against content, key, and tags.
+    /// - Returns: Matching entries sorted by most recent first.
     public func recall(_ query: String) -> [SymMemoryEntry] {
         store.search(query: query)
     }
@@ -471,8 +521,14 @@ public final class SymNode {
 
     // MARK: - Mood
 
-    /// Broadcast mood to all peers. Receiving agents evaluate this
-    /// against their cognitive state and autonomously decide whether to act.
+    /// Broadcast mood to all peers. See MMP v0.2.0 Section 9.3.
+    ///
+    /// Receiving agents evaluate this against their cognitive state and autonomously
+    /// decide whether to act. Mood crosses domain boundaries — even rejected CMBs
+    /// deliver their mood field.
+    /// - Parameters:
+    ///   - mood: Mood label (e.g. "tired", "focused", "stressed").
+    ///   - context: Optional context string describing the mood trigger.
     public func broadcastMood(_ mood: String, context: String? = nil) {
         var frame = SymFrame(type: .mood)
         frame.from = identity.nodeId
@@ -489,8 +545,14 @@ public final class SymNode {
 
     // MARK: - Wake
 
-    /// Set the APNs/FCM device token for P2P wake.
+    /// Set the APNs/FCM device token for P2P wake. See MMP v0.2.0 Section 5.
+    ///
     /// Called from AppDelegate when the device registers for remote notifications.
+    /// The token is broadcast to already-connected peers so they can wake this node.
+    /// - Parameters:
+    ///   - platform: Push platform identifier (e.g. "apns", "fcm").
+    ///   - token: Device push token string.
+    ///   - environment: Push environment ("production" or "sandbox"). Defaults to "production".
     public func setWakeToken(platform: String, token: String, environment: String = "production") {
         wakeChannel = (platform: platform, token: token, environment: environment)
         logger.info("[SYM] wake: set: \(platform)")
@@ -500,7 +562,10 @@ public final class SymNode {
         broadcastToPeers(frame)
     }
 
-    /// Reconnect to the relay (called from silent push handler).
+    /// Reconnect to the relay after a P2P wake. See MMP v0.2.0 Section 5.
+    ///
+    /// Typically called from a silent push handler (e.g. `didReceiveRemoteNotification`).
+    /// Tears down the current relay session and creates a fresh one.
     public func reconnect() {
         guard _running else { return }
         relaySession?.stop()
@@ -514,7 +579,10 @@ public final class SymNode {
 
     // MARK: - Communication
 
-    /// Send a message to all peers or a specific peer.
+    /// Send a text message to all peers or a specific peer. See MMP v0.2.0 Section 7.
+    /// - Parameters:
+    ///   - message: The message content string.
+    ///   - peerId: Target peer node ID, or nil to broadcast to all peers.
     public func send(_ message: String, to peerId: String? = nil) {
         let frame = SymFrame.message(from: identity.nodeId, fromName: name, content: message)
 
@@ -527,7 +595,8 @@ public final class SymNode {
 
     // MARK: - Monitoring
 
-    /// Connected peers with coupling state.
+    /// List connected peers with their current SVAF coupling state. See MMP v0.2.0 Section 9.
+    /// - Returns: Array of ``SymPeerInfo`` for each connected peer.
     public func peerList() -> [SymPeerInfo] {
         let decisions = meshNode.couplingDecisions
         let currentPeers: [String: PeerState] = peerQueue.sync { self.peers }
@@ -545,13 +614,14 @@ public final class SymNode {
         }
     }
 
-    /// Memory count.
+    /// Total memory count across local and peer stores. See MMP v0.2.0 Section 6.
     public var memoryCount: Int { store.count }
 
-    /// Mesh coherence.
+    /// Mesh coherence score (0-1), or nil if no peers connected. See MMP v0.2.0 Section 9.
     public var coherence: Float? { meshNode.coherence }
 
-    /// Full node status.
+    /// Full node status snapshot including peers, memory count, and coherence. See MMP v0.2.0 Section 13.
+    /// - Returns: A ``SymNodeStatus`` with the current state of this node.
     public func status() -> SymNodeStatus {
         let peerInfo = peerList()
         return SymNodeStatus(

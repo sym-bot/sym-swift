@@ -14,15 +14,20 @@ import os.log
 
 // MARK: - Discovery Delegate
 
+/// Delegate for Bonjour discovery lifecycle events.
 protocol SymDiscoveryDelegate: AnyObject {
+    /// A new peer was discovered via Bonjour.
     func discoveryDidFindPeer(nodeId: String, name: String, browseResult: NWBrowser.Result)
+    /// A previously discovered peer's Bonjour record was removed.
     func discoveryDidLosePeer(nodeId: String)
+    /// An inbound TCP connection was accepted from a peer.
     func discoveryDidAcceptConnection(_ connection: NWConnection)
 }
 
 // MARK: - Discovery Service
 
-/// Handles Bonjour advertisement and browsing for SYM peers.
+/// Handles Bonjour advertisement and browsing for SYM peers on the local network.
+/// See MMP v0.2.0 Section 5 (Connection, Layer 2).
 ///
 /// Service type: `_sym._tcp` — interoperable with Node.js SYM nodes.
 /// TXT record carries: node-id, node-name, hostname.

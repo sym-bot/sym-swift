@@ -16,28 +16,31 @@ import UIKit
 // MARK: - Identity
 
 /// Persistent node identity. Created once, reused across sessions.
+/// See MMP v0.2.0 Section 3 (Identity, Layer 0).
 public struct SymIdentity: Codable, Sendable {
 
-    /// Unique node ID (UUID string)
+    /// Unique node ID (lowercased UUID string). See MMP v0.2.0 Section 3.
     public let nodeId: String
 
-    /// Display name
+    /// Display name of this node.
     public let name: String
 
-    /// Machine hostname at creation time
+    /// Machine hostname at identity creation time.
     public let hostname: String
 
-    /// Creation timestamp
+    /// Timestamp when this identity was first created.
     public let createdAt: Date
 }
 
 // MARK: - Identity Manager
 
-/// Manages node identity persistence.
+/// Manages node identity persistence. See MMP v0.2.0 Section 3 (Identity, Layer 0).
 /// Each node name gets its own identity file under the SYM data directory.
 enum SymIdentityManager {
 
-    /// Load existing identity or create a new one.
+    /// Load existing identity from disk, or create and persist a new one.
+    /// - Parameter name: The node display name. Also used as the directory name for persistence.
+    /// - Returns: The loaded or newly created ``SymIdentity``.
     static func loadOrCreate(name: String) -> SymIdentity {
         let dir = nodeDirectory(for: name)
         let path = dir.appendingPathComponent("identity.json")
@@ -63,6 +66,8 @@ enum SymIdentityManager {
     }
 
     /// Data directory for a named node.
+    /// - Parameter name: The node display name.
+    /// - Returns: File URL to `~/Library/Application Support/SYM/nodes/{name}/` (or `~/.sym/nodes/{name}/` as fallback).
     static func nodeDirectory(for name: String) -> URL {
         let base: URL
         if let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {

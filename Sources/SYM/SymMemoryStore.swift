@@ -14,12 +14,13 @@ import os.log
 
 // MARK: - Memory Entry
 
-/// Alias for backward compatibility — CMBStoreEntry is the canonical type.
+/// Alias for backward compatibility — ``CMBStoreEntry`` is the canonical type.
+/// See MMP v0.2.0 Section 6 (Memory).
 public typealias SymMemoryEntry = CMBStoreEntry
 
 // MARK: - Memory Store
 
-/// SYM's default file-based CMB store.
+/// SYM's default file-based CMB store. See MMP v0.2.0 Section 6 (Memory, Layer 3).
 ///
 /// Layout:
 /// ```

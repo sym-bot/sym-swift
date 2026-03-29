@@ -128,7 +128,8 @@ private enum AnyCodableValue: Codable {
 
 // MARK: - Relay Session
 
-/// Manages a WebSocket connection to a SYM relay server.
+/// Manages a WebSocket connection to a SYM relay server for internet-scale mesh.
+/// See MMP v0.2.0 Section 4 (Transport, Layer 1).
 ///
 /// Protocol:
 ///   1. Connect via WebSocket
@@ -136,6 +137,8 @@ private enum AnyCodableValue: Codable {
 ///   3. Receive relay-peers (existing peers on the relay)
 ///   4. Send/receive SYM frames wrapped in relay envelopes
 ///   5. Relay notifies peer-joined/peer-left events
+///
+/// The relay is dumb transport — all coupling decisions remain on-device.
 final class SymRelaySession {
 
     // MARK: - Properties

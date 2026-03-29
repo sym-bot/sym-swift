@@ -29,9 +29,10 @@ protocol SymPeerSessionDelegate: AnyObject {
 // MARK: - Peer Session
 
 /// Manages a single NWConnection to a SYM peer.
+/// See MMP v0.2.0 Section 4 (Transport, Layer 1) and Section 5 (Connection, Layer 2).
 ///
 /// Framing: [4-byte big-endian u32 length][JSON SymFrame]
-/// Same wire format as Node.js SYM.
+/// Same wire format as Node.js SYM. Handles handshake, heartbeat, and send/receive lifecycle.
 final class SymPeerSession {
 
     // MARK: - Properties
