@@ -780,7 +780,7 @@ public final class SymNode {
                     }
 
                     let cosSim = CMBEncoder.cosineSimilarity(incomingField.vector, anchorField.vector)
-                    let anchorAge = Float(now - anchor.storedAt) / 1000.0
+                    let anchorAge = now >= anchor.storedAt ? Float(now - anchor.storedAt) / 1000.0 : 0.0
                     let anchorDecay = exp(-anchorAge / self.svafFreshnessSeconds)
                     let w = alphaF * max(cosSim, 0) * anchorDecay * anchor.confidence
 
