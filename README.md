@@ -54,7 +54,7 @@ Or in Package.swift:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/sym-bot/sym-swift.git", from: "0.2.6")
+    .package(url: "https://github.com/sym-bot/sym-swift.git", from: "0.3.0")
 ],
 targets: [
     .target(name: "YourApp", dependencies: [
