@@ -14,7 +14,7 @@
 
 SYM handles discovery, connection, and collective intelligence. Your app finds other agents on the local network automatically — no servers, no accounts, no configuration. An iOS app and Claude Code on the same network discover each other and think together using the same protocol.
 
-You build the domain logic — what your agent observes and how it responds to mesh events.
+You build the domain logic — what your agent observes and how it responds to mesh events. See [How Agents Extract CAT7 Fields](https://github.com/sym-bot/sym#how-agents-extract-cat7-fields) for the three extraction approaches (LLM, structured data, prompt template).
 
 ## Proof of Concept
 
@@ -222,10 +222,13 @@ let node = SymNode(name: "my-app")
 node.start()
 node.stop()
 
-// Share observations from your domain
-node.remember("user completed a 30-min workout", tags: ["fitness"])
-node.broadcastMood("energized after exercise")
-node.send("workout complete")
+// Share observations — the agent extracts CAT7 fields from its domain data
+node.remember(fields: [
+    .focus:      CMBEncoder.encodeField("workout session completed"),
+    .commitment: CMBEncoder.encodeField("30min, 320 cal burned"),
+    .perspective: CMBEncoder.encodeField("fitness agent, post-workout"),
+    .mood:       CMBEncoder.encodeField("energized", valence: 0.7, arousal: 0.6),
+])
 
 // Query the mesh
 node.recall("energy patterns")   // [SymMemoryEntry]
