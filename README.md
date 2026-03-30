@@ -15,7 +15,7 @@ SYM Swift is the native SDK for the [Mesh Memory Protocol (MMP)](https://sym.bot
 
 SYM handles discovery, connection, and collective intelligence. Your app finds other agents on the local network automatically — no servers, no accounts, no configuration. An iOS app and Claude Code on the same network discover each other and think together using the same protocol.
 
-Before you start, read the [MMP Specification](https://sym.bot/spec/mmp) to understand the protocol — the 8-layer architecture, CMB structure, SVAF per-field evaluation, and how agents produce and consume signals on the mesh.
+Before you start, read the [MMP Specification](https://sym.bot/spec/mmp) to understand the protocol — the 8-layer architecture, CMB structure, [SVAF](https://sym.bot/research/svaf) (Symbolic-Vector Attention Fusion) per-field evaluation that decides what enters each agent's memory, and how agents produce and consume signals on the mesh.
 
 You build the domain logic — what your agent observes and how it responds to mesh events. See [How Agents Extract CAT7 Fields](https://github.com/sym-bot/sym#how-agents-extract-cat7-fields) for the three extraction approaches (LLM, structured data, prompt template).
 
