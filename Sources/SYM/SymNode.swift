@@ -997,9 +997,15 @@ public final class SymNode {
             let decision = totalDrift <= self.svafStableThreshold ? "aligned" : "guarded"
 
             // 7. Create FUSED CMB — this is a NEW synthesized memory
+            // Lineage: fused CMB is a child of the incoming CMB (MMP Section 14)
+            let fusedLineage = CMBLineage(
+                parents: [incomingCMB.key],
+                ancestors: (incomingCMB.lineage?.ancestors ?? []) + [incomingCMB.key]
+            )
             let fusedCMB = CognitiveMemoryBlock(
                 fields: fusedFields,
                 source: "\(self.name)+\(frame.source ?? peerName)",
+                lineage: fusedLineage,
                 originTimestamp: originTs,
                 storedAt: now,
                 confidence: confidence * (1.0 - aggregateFieldDrift),
