@@ -72,7 +72,7 @@ public struct SymPeerInfo: Sendable {
 public struct SymNodeStatus: Sendable {
     /// Display name of this node.
     public let name: String
-    /// Truncated node ID (first 8 characters). See MMP v0.2.0 Section 3.
+    /// Full node ID (UUID). See MMP v0.2.0 Section 3.
     public let nodeId: String
     /// Whether the node is currently running.
     public let running: Bool
@@ -168,6 +168,9 @@ public final class SymNode {
 
     /// Display name of this node, used in handshake and peer identification. See MMP v0.2.0 Section 3.
     public let name: String
+
+    /// Globally unique node ID (full UUID). Available immediately after init. See MMP Section 3.1.
+    public let nodeId: String
 
     /// Cognitive profile — declares what this agent understands.
     /// Encoded into the cognitive state so the coupling engine knows
@@ -313,6 +316,7 @@ public final class SymNode {
         self.relayToken = relayToken
         self.relayOnly = relayOnly
         self.identity = SymIdentityManager.loadOrCreate(name: name)
+        self.nodeId = identity.nodeId
         self.logger = Logger(subsystem: "bot.sym", category: "SymNode.\(name)")
 
         // E2E encryption keypair — persisted alongside identity
@@ -642,7 +646,7 @@ public final class SymNode {
         return currentPeers.map { (id, peer) in
             let d = decisions[id]
             return SymPeerInfo(
-                id: String(id.prefix(8)),
+                id: id,
                 name: peer.name,
                 connected: true,
                 lastSeen: peer.lastSeen,
@@ -664,7 +668,7 @@ public final class SymNode {
         let peerInfo = peerList()
         return SymNodeStatus(
             name: name,
-            nodeId: String(identity.nodeId.prefix(8)),
+            nodeId: identity.nodeId,
             running: _running,
             port: relayOnly ? 0 : discovery.port,
             relay: relayURL?.absoluteString,
@@ -715,8 +719,8 @@ public final class SymNode {
             return
         }
 
-        // Send handshake (with E2E public key) + cognitive state + wake channel
-        session.send(.handshake(nodeId: identity.nodeId, name: name, e2ePublicKey: e2ePublicKeyB64))
+        // Send handshake (with identity public key + E2E public key) + cognitive state + wake channel
+        session.send(.handshake(nodeId: identity.nodeId, name: name, publicKey: identity.publicKey, e2ePublicKey: e2ePublicKeyB64))
 
         let (h1, h2) = meshNode.coupledState()
         session.send(.stateSync(h1: h1, h2: h2, confidence: 0.8))
@@ -751,8 +755,8 @@ public final class SymNode {
 
         guard added else { return }
 
-        // Send handshake (with E2E public key) + cognitive state + wake channel via relay
-        relaySession?.send(.handshake(nodeId: identity.nodeId, name: name, e2ePublicKey: e2ePublicKeyB64), to: nodeId)
+        // Send handshake (with identity public key + E2E public key) + cognitive state + wake channel via relay
+        relaySession?.send(.handshake(nodeId: identity.nodeId, name: name, publicKey: identity.publicKey, e2ePublicKey: e2ePublicKeyB64), to: nodeId)
 
         let (h1, h2) = meshNode.coupledState()
         relaySession?.send(.stateSync(h1: h1, h2: h2, confidence: 0.8), to: nodeId)

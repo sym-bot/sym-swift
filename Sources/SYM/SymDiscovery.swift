@@ -90,6 +90,7 @@ final class SymDiscovery {
             var txtRecord = NWTXTRecord()
             txtRecord["node-id"] = identity.nodeId
             txtRecord["node-name"] = identity.name
+            txtRecord["public-key"] = identity.publicKey
             txtRecord["hostname"] = identity.hostname
 
             listener.service = NWListener.Service(

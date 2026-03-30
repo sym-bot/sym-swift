@@ -201,11 +201,7 @@ final class SymPeerSession {
         case .ready:
             logger.info("[SYM] session: connection ready (outbound=\(self.isOutbound))")
             startReceiving()
-
-            if isOutbound {
-                // Send handshake immediately
-                sendOnQueue(.handshake(nodeId: identity.nodeId, name: identity.name))
-            }
+            // Handshake is sent by SymNode after peer registration (with publicKey + e2ePublicKey)
 
         case .failed(let error):
             logger.error("[SYM] session: connection failed: \(error.localizedDescription)")

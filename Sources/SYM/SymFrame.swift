@@ -117,6 +117,8 @@ public struct SymFrame: Codable, Sendable {
     public var nodeId: String?
     /// Sender's display name (used in handshake).
     public var name: String?
+    /// Sender's Ed25519 identity public key (base64url). See MMP Section 3.1.3.
+    public var publicKey: String?
     /// Sender's E2E public key (base64, Curve25519 raw 32 bytes) for key agreement.
     /// Present in handshake frames when E2E encryption is supported.
     public var e2ePublicKey: String?
@@ -168,7 +170,7 @@ public struct SymFrame: Codable, Sendable {
     public var e2e: E2EMetadata?
 
     private enum CodingKeys: String, CodingKey {
-        case type, nodeId, name, e2ePublicKey
+        case type, nodeId, name, publicKey, e2ePublicKey
         case h1, h2, confidence
         case key, content, source, tags, originTimestamp, storedAt, timestamp
         case mood, context
@@ -214,10 +216,11 @@ public struct SymFrame: Codable, Sendable {
 
     // MARK: - Factory Methods
 
-    static func handshake(nodeId: String, name: String, e2ePublicKey: String? = nil) -> SymFrame {
+    static func handshake(nodeId: String, name: String, publicKey: String? = nil, e2ePublicKey: String? = nil) -> SymFrame {
         var frame = SymFrame(type: .handshake)
         frame.nodeId = nodeId
         frame.name = name
+        frame.publicKey = publicKey
         frame.e2ePublicKey = e2ePublicKey
         return frame
     }
