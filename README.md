@@ -1,14 +1,15 @@
 # SYM Swift
 
-**Infrastructure and protocol for multi-agent collective intelligence on iOS and macOS.**
+**Add your iOS or macOS app to the mesh. Think together with every other agent on the network.**
 
-[SYM](https://github.com/sym-bot/sym) provides the mesh infrastructure and wire protocol. SYM decides what gets shared between agents — you build the domain logic on top. Your AI coding agent reads this README and wires your app into the mesh in minutes.
+Your app sees workouts. Claude Code sees fatigue. MeloTune sees a skipped playlist. Alone, each is noise. On the mesh, they become collective intelligence — and your app acts on it autonomously.
 
-> *"Add SYM to my iOS app so it joins the mesh and thinks together with my other agents."*
+SYM Swift is the native SDK for the [Mesh Memory Protocol (MMP)](https://sym.bot/spec/mmp). Add the package, wire in a service class, and your app joins the mesh alongside Claude Code and any other SYM agent on the local network. No servers, no APIs, no integration code.
 
 [![Swift](https://img.shields.io/badge/Swift_SPM-compatible-orange)](https://github.com/sym-bot/sym-swift)
-[![MMP Spec](https://img.shields.io/badge/MMP_Spec-v0.2.0-purple)](https://sym.bot/spec/mmp)
+[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.0-purple)](https://sym.bot/spec/mmp)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![CI](https://github.com/sym-bot/sym-swift/actions/workflows/ci.yml/badge.svg)](https://github.com/sym-bot/sym-swift/actions/workflows/ci.yml)
 
 ## What SYM Handles
 
@@ -54,7 +55,7 @@ Or in Package.swift:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/sym-bot/sym-swift.git", from: "0.3.1")
+    .package(url: "https://github.com/sym-bot/sym-swift.git", from: "0.3.2")
 ],
 targets: [
     .target(name: "YourApp", dependencies: [
