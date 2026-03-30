@@ -292,6 +292,10 @@ Your app's own logs should use a different prefix (e.g. `[Mesh]`, `[MyApp]`) to 
 
 Same wire protocol as [SYM](https://github.com/sym-bot/sym) (Node.js). A Swift app and Claude Code discover each other on the same network and think together automatically.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). All changes must comply with the [MMP specification](https://sym.bot/spec/mmp) and pass CI before merge.
+
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE)
