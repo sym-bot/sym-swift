@@ -10,6 +10,7 @@ SYM Swift is the native SDK for the [Mesh Memory Protocol (MMP)](https://sym.bot
 [![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.0-purple)](https://sym.bot/spec/mmp)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![CI](https://github.com/sym-bot/sym-swift/actions/workflows/ci.yml/badge.svg)](https://github.com/sym-bot/sym-swift/actions/workflows/ci.yml)
+[![中文文档](https://img.shields.io/badge/语言-中文-red)](README_zh.md)
 
 ## What SYM Handles
 
