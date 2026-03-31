@@ -69,6 +69,16 @@ public struct SymNodeMetrics: Sendable {
     public var peersLeft: Int = 0
     /// recall() queries.
     public var recalls: Int = 0
+    /// LLM API calls reported by agent.
+    public var llmCalls: Int = 0
+    /// Total LLM input tokens.
+    public var llmTokensIn: Int = 0
+    /// Total LLM output tokens.
+    public var llmTokensOut: Int = 0
+    /// Last LLM model used.
+    public var llmModel: String? = nil
+    /// Remix attempts rejected (no new domain data).
+    public var remixRejected: Int = 0
     /// When the node started.
     public var startedAt: Date? = nil
     /// Uptime since start.
@@ -515,7 +525,9 @@ public final class SymNode {
         // If parents are specified (this is a remix), the agent MUST have
         // produced new domain observations since its last remix.
         if !parents.isEmpty && !_hasNewDomainData {
+            _metrics.remixRejected += 1
             logger.warning("[SYM] Remix rejected: no new domain data (MMP Section 14.7)")
+            emit(.metric(type: "remix-rejected", detail: ["reason": "no-new-domain-data"]))
             return nil
         }
 
@@ -760,6 +772,16 @@ public final class SymNode {
     public func markRemixed() { _hasNewDomainData = false }
 
     // MARK: - Protocol Metrics (MMP v0.2.0 Section 13)
+
+    /// Report an LLM API call for protocol-level cost tracking.
+    /// Called by the agent after each LLM invocation.
+    public func reportLLMUsage(tokensIn: Int, tokensOut: Int, model: String = "gpt-4o-mini") {
+        _metrics.llmCalls += 1
+        _metrics.llmTokensIn += tokensIn
+        _metrics.llmTokensOut += tokensOut
+        _metrics.llmModel = model
+        emit(.metric(type: "llm-call", detail: ["tokensIn": "\(tokensIn)", "tokensOut": "\(tokensOut)", "model": model]))
+    }
 
     /// Get cumulative protocol-level metrics since node start.
     public func metrics() -> SymNodeMetrics { _metrics }
