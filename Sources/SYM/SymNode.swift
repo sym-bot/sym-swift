@@ -302,12 +302,23 @@ public final class SymNode {
 
     // MARK: - Internal Peer State
 
+    /// Per MMP Section 4.6: a peer MAY have multiple transports (LAN + WAN).
+    /// Peer-left only when ALL transports close (Section 5.5).
     private struct PeerState {
-        let session: SymPeerSession?
+        var transports: [String: SymPeerSession?] // source → session (nil for relay)
         let name: String
         let isOutbound: Bool
-        let source: String // "bonjour" or "relay"
         var lastSeen: Date
+
+        /// The primary source — first transport added.
+        var source: String { transports.keys.first ?? "unknown" }
+
+        /// Best session for sending: bonjour > relay.
+        var session: SymPeerSession? {
+            if let s = transports["bonjour"] { return s }
+            for (_, s) in transports { if let s { return s } }
+            return nil
+        }
     }
 
     // MARK: - Init
@@ -750,12 +761,12 @@ public final class SymNode {
 
     private func broadcastToPeers(_ frame: SymFrame) {
         let currentPeers: [String: PeerState] = peerQueue.sync { self.peers }
-        for (_, peer) in currentPeers {
-            if peer.source == "relay" {
-                // Relay peers use the relay session
-                relaySession?.broadcast(frame)
-            } else {
-                peer.session?.send(frame)
+        for (nodeId, peer) in currentPeers {
+            // Section 4.6: send via best transport (bonjour > relay)
+            if let session = peer.session {
+                session.send(frame)
+            } else if peer.transports.keys.contains("relay") {
+                relaySession?.send(frame, to: nodeId)
             }
         }
     }
@@ -789,94 +800,120 @@ public final class SymNode {
     private func sendToPeer(nodeId: String, frame: SymFrame) {
         let peer: PeerState? = peerQueue.sync { self.peers[nodeId] }
         guard let peer else { return }
-        if peer.source == "relay" {
+        // Section 4.6: send via best transport (bonjour > relay)
+        if let session = peer.session {
+            session.send(frame)
+        } else if peer.transports.keys.contains("relay") {
             relaySession?.send(frame, to: nodeId)
-        } else {
-            peer.session?.send(frame)
         }
     }
 
+    // MARK: - Multi-Transport Peer Management (MMP Section 4.6)
+
     private func addPeer(_ session: SymPeerSession, nodeId: String, peerName: String, isOutbound: Bool) {
-        let added = peerQueue.sync { () -> Bool in
-            guard self.peers[nodeId] == nil else { return false }
+        let isNew = peerQueue.sync { () -> Bool in
+            if var existing = self.peers[nodeId] {
+                // Section 4.6: add Bonjour as secondary transport
+                existing.transports["bonjour"] = session
+                existing.lastSeen = Date()
+                self.peers[nodeId] = existing
+                return false
+            }
             self.peers[nodeId] = PeerState(
-                session: session, name: peerName, isOutbound: isOutbound,
-                source: "bonjour", lastSeen: Date()
+                transports: ["bonjour": session], name: peerName,
+                isOutbound: isOutbound, lastSeen: Date()
             )
             return true
         }
 
-        guard added else {
-            session.disconnect()
-            return
-        }
-
-        // Send handshake (with identity public key + E2E public key) + cognitive state + wake channel
+        // Send handshake + cognitive state + wake channel
         session.send(.handshake(nodeId: identity.nodeId, name: name, publicKey: identity.publicKey, e2ePublicKey: e2ePublicKeyB64))
-
         let (h1, h2) = meshNode.coupledState()
         session.send(.stateSync(h1: h1, h2: h2, confidence: 0.8))
-
         if let wc = wakeChannel {
             session.send(.wakeChannel(platform: wc.platform, token: wc.token, environment: wc.environment))
         }
 
-        // Share known peers (gossip) so the new peer learns about the mesh
-        let knownPeers = buildPeerGossip(excluding: nodeId)
-        if !knownPeers.isEmpty {
-            session.send(.peerInfo(peers: knownPeers))
-        }
+        if isNew {
+            let knownPeers = buildPeerGossip(excluding: nodeId)
+            if !knownPeers.isEmpty { session.send(.peerInfo(peers: knownPeers)) }
 
-        logger.info("[SYM] peer: connected: \(peerName) (\(isOutbound ? "outbound" : "inbound"), bonjour)")
-        _metrics.peersJoined += 1
-        emit(.peerJoined(nodeId: nodeId, name: peerName))
-        emit(.metric(type: "peer-joined", detail: ["name": peerName, "source": "bonjour"]))
+            logger.info("[SYM] peer: connected: \(peerName) (\(isOutbound ? "outbound" : "inbound"), bonjour)")
+            _metrics.peersJoined += 1
+            emit(.peerJoined(nodeId: nodeId, name: peerName))
+            emit(.metric(type: "peer-joined", detail: ["name": peerName, "source": "bonjour"]))
+        } else {
+            logger.info("[SYM] transport added for \(peerName): bonjour")
+        }
     }
 
     private func addRelayPeer(nodeId: String, peerName: String) {
         guard nodeId != identity.nodeId else { return }
-        // Skip peers without proper names (gossip artifacts)
         guard !peerName.isEmpty, peerName != "unknown" else { return }
 
-        let added = peerQueue.sync { () -> Bool in
-            guard self.peers[nodeId] == nil else { return false }
+        let isNew = peerQueue.sync { () -> Bool in
+            if var existing = self.peers[nodeId] {
+                // Section 4.6: add relay as secondary transport
+                existing.transports["relay"] = nil as SymPeerSession?
+                existing.lastSeen = Date()
+                self.peers[nodeId] = existing
+                return false
+            }
             self.peers[nodeId] = PeerState(
-                session: nil, name: peerName, isOutbound: true,
-                source: "relay", lastSeen: Date()
+                transports: ["relay": nil], name: peerName,
+                isOutbound: true, lastSeen: Date()
             )
             return true
         }
 
-        guard added else { return }
-
-        // Send handshake (with identity public key + E2E public key) + cognitive state + wake channel via relay
+        // Send handshake + cognitive state + wake channel via relay
         relaySession?.send(.handshake(nodeId: identity.nodeId, name: name, publicKey: identity.publicKey, e2ePublicKey: e2ePublicKeyB64), to: nodeId)
-
         let (h1, h2) = meshNode.coupledState()
         relaySession?.send(.stateSync(h1: h1, h2: h2, confidence: 0.8), to: nodeId)
-
         if let wc = wakeChannel {
             relaySession?.send(.wakeChannel(platform: wc.platform, token: wc.token, environment: wc.environment), to: nodeId)
         }
 
-        // Share known peers (gossip) so the new peer learns about the mesh
-        let knownPeers = buildPeerGossip(excluding: nodeId)
-        if !knownPeers.isEmpty {
-            relaySession?.send(.peerInfo(peers: knownPeers), to: nodeId)
-        }
+        if isNew {
+            let knownPeers = buildPeerGossip(excluding: nodeId)
+            if !knownPeers.isEmpty { relaySession?.send(.peerInfo(peers: knownPeers), to: nodeId) }
 
-        logger.info("[SYM] peer: connected: \(peerName) (outbound, relay)")
-        _metrics.peersJoined += 1
-        emit(.peerJoined(nodeId: nodeId, name: peerName))
-        emit(.metric(type: "peer-joined", detail: ["name": peerName, "source": "relay"]))
+            logger.info("[SYM] peer: connected: \(peerName) (outbound, relay)")
+            _metrics.peersJoined += 1
+            emit(.peerJoined(nodeId: nodeId, name: peerName))
+            emit(.metric(type: "peer-joined", detail: ["name": peerName, "source": "relay"]))
+        } else {
+            logger.info("[SYM] transport added for \(peerName): relay")
+        }
     }
 
-    private func removeRelayPeers() {
-        let relayPeerIds: [String] = peerQueue.sync {
-            self.peers.filter { $0.value.source == "relay" }.map(\.key)
+    /// Section 4.6 + 5.5: remove a single transport. Peer-left only when ALL transports close.
+    private func removeTransport(nodeId: String, source: String) {
+        let shouldRemovePeer = peerQueue.sync { () -> Bool in
+            guard var peer = self.peers[nodeId] else { return false }
+            peer.transports.removeValue(forKey: source)
+            if peer.transports.isEmpty {
+                return true // will be removed by removePeer below
+            }
+            self.peers[nodeId] = peer
+            return false
         }
-        for nodeId in relayPeerIds {
+
+        if shouldRemovePeer {
             removePeer(nodeId: nodeId)
+        } else {
+            let peerName = peerQueue.sync { self.peers[nodeId]?.name ?? "unknown" }
+            logger.info("[SYM] transport closed for \(peerName): \(source) (other transports remain)")
+        }
+    }
+
+    /// Section 5.5: on relay disconnect, close relay transports only — Bonjour survives.
+    private func removeRelayTransports() {
+        let peerIds: [String] = peerQueue.sync {
+            self.peers.filter { $0.value.transports.keys.contains("relay") }.map(\.key)
+        }
+        for nodeId in peerIds {
+            removeTransport(nodeId: nodeId, source: "relay")
         }
     }
 
@@ -1285,7 +1322,8 @@ extension SymNode: SymPeerSessionDelegate {
         peerQueue.sync { _ = self.pendingSessions.removeValue(forKey: key) }
 
         guard let nodeId = session.peerNodeId else { return }
-        removePeer(nodeId: nodeId)
+        // Section 4.6 + 5.5: remove Bonjour transport only — peer survives if relay exists
+        removeTransport(nodeId: nodeId, source: "bonjour")
     }
 }
 
@@ -1302,9 +1340,8 @@ extension SymNode: SymRelaySessionDelegate {
     }
 
     func relayDidLosePeer(nodeId: String, name: String) {
-        let peer: PeerState? = peerQueue.sync { self.peers[nodeId] }
-        guard let peer, peer.source == "relay" else { return }
-        removePeer(nodeId: nodeId)
+        // Section 4.6 + 5.5: remove relay transport only — Bonjour survives
+        removeTransport(nodeId: nodeId, source: "relay")
     }
 
     func relay(didReceiveFrame frame: SymFrame, from nodeId: String, fromName: String) {
@@ -1319,6 +1356,6 @@ extension SymNode: SymRelaySessionDelegate {
 
     func relayDidDisconnect(reason: String) {
         logger.info("[SYM] relay disconnected: \(reason)")
-        removeRelayPeers()
+        removeRelayTransports()
     }
 }
