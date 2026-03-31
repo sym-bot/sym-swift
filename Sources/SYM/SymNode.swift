@@ -45,6 +45,37 @@ public enum SymEvent {
     /// Peer's cognitive state received via state-sync frame.
     /// h1/h2 are CfC hidden state vectors for neural coupling. See MMP v0.2.0 Section 5.
     case stateSyncReceived(from: String, h1: [Float], h2: [Float], confidence: Float)
+    /// A peer CMB was accepted by SVAF and stored. Application layer can remix.
+    /// Per MMP v0.2.0 Section 14: remix only when agent has new domain data.
+    case cmbAccepted(entry: SymMemoryEntry)
+    /// Protocol-level metric event for observability.
+    case metric(type: String, detail: [String: String])
+}
+
+// MARK: - Protocol Metrics
+
+/// Cumulative protocol-level metrics for observability.
+/// See MMP v0.2.0 Section 13 (Application).
+public struct SymNodeMetrics: Sendable {
+    /// CMBs created by this agent via remember().
+    public var cmbProduced: Int = 0
+    /// Peer CMBs accepted by SVAF.
+    public var cmbAccepted: Int = 0
+    /// Remix CMBs (remember() with parents).
+    public var remixProduced: Int = 0
+    /// Peers that connected.
+    public var peersJoined: Int = 0
+    /// Peers that disconnected.
+    public var peersLeft: Int = 0
+    /// recall() queries.
+    public var recalls: Int = 0
+    /// When the node started.
+    public var startedAt: Date? = nil
+    /// Uptime since start.
+    public var uptimeMs: Int {
+        guard let s = startedAt else { return 0 }
+        return Int(Date().timeIntervalSince(s) * 1000)
+    }
 }
 
 // MARK: - Peer Info
@@ -192,6 +223,12 @@ public final class SymNode {
     private let meshNode: MeshNode
     private let discovery: SymDiscovery
     private let logger: Logger
+
+    // Protocol metrics — MMP v0.2.0 Section 13 (Application).
+    private var _metrics = SymNodeMetrics()
+
+    // Remix guard — MMP v0.2.0 Section 14.7: agents MUST NOT remix without new domain data.
+    private var _hasNewDomainData = false
 
     // E2E encryption (Curve25519 + AES-256-GCM)
     private let e2ePrivateKey: Curve25519.KeyAgreement.PrivateKey
@@ -372,6 +409,7 @@ public final class SymNode {
     public func start() {
         guard !_running else { return }
         _running = true
+        _metrics.startedAt = Date()
 
         if !relayOnly {
             discovery.delegate = self
@@ -485,6 +523,13 @@ public final class SymNode {
         logger.info("[SYM] remember: \"\(content.prefix(80))\"")
         let entry = CMBStoreEntry(content: content, source: name, tags: tags, originTimestamp: originTimestamp, cmb: cmb)
         guard let stored = store.write(entry: entry) else { return entry }
+
+        // Protocol metrics + remix guard
+        _metrics.cmbProduced += 1
+        if !parents.isEmpty { _metrics.remixProduced += 1 }
+        _hasNewDomainData = true
+        emit(.metric(type: "cmb-produced", detail: ["key": stored.key, "hasLineage": parents.isEmpty ? "false" : "true"]))
+
         return _afterRemember(stored)
     }
 
@@ -548,7 +593,8 @@ public final class SymNode {
     /// - Parameter query: Search keyword matched against content, key, and tags.
     /// - Returns: Matching entries sorted by most recent first.
     public func recall(_ query: String) -> [SymMemoryEntry] {
-        store.search(query: query)
+        _metrics.recalls += 1
+        return store.search(query: query)
     }
 
     // MARK: - State Sync
@@ -694,6 +740,22 @@ public final class SymNode {
         }
     }
 
+    // MARK: - Remix Guard (MMP v0.2.0 Section 14.7)
+
+    /// Check whether this agent has new domain data available for remix.
+    /// Per MMP Section 14.7: agents MUST NOT remix peer signals unless they
+    /// have new observations from their own domain to intersect with.
+    public func canRemix() -> Bool { _hasNewDomainData }
+
+    /// Mark that the agent has completed a remix cycle. Resets the flag
+    /// so the agent stays silent until it has fresh domain observations.
+    public func markRemixed() { _hasNewDomainData = false }
+
+    // MARK: - Protocol Metrics (MMP v0.2.0 Section 13)
+
+    /// Get cumulative protocol-level metrics since node start.
+    public func metrics() -> SymNodeMetrics { _metrics }
+
     private func sendToPeer(nodeId: String, frame: SymFrame) {
         let peer: PeerState? = peerQueue.sync { self.peers[nodeId] }
         guard let peer else { return }
@@ -736,7 +798,9 @@ public final class SymNode {
         }
 
         logger.info("[SYM] peer: connected: \(peerName) (\(isOutbound ? "outbound" : "inbound"), bonjour)")
+        _metrics.peersJoined += 1
         emit(.peerJoined(nodeId: nodeId, name: peerName))
+        emit(.metric(type: "peer-joined", detail: ["name": peerName, "source": "bonjour"]))
     }
 
     private func addRelayPeer(nodeId: String, peerName: String) {
@@ -772,7 +836,9 @@ public final class SymNode {
         }
 
         logger.info("[SYM] peer: connected: \(peerName) (outbound, relay)")
+        _metrics.peersJoined += 1
         emit(.peerJoined(nodeId: nodeId, name: peerName))
+        emit(.metric(type: "peer-joined", detail: ["name": peerName, "source": "relay"]))
     }
 
     private func removeRelayPeers() {
@@ -809,7 +875,9 @@ public final class SymNode {
 
         if let peer {
             logger.info("[SYM] peer: disconnected: \(peer.name)")
+            _metrics.peersLeft += 1
             emit(.peerLeft(nodeId: nodeId, name: peer.name))
+            emit(.metric(type: "peer-left", detail: ["name": peer.name]))
         }
     }
 
@@ -1030,6 +1098,11 @@ public final class SymNode {
                 cmb: fusedCMB
             )
             store.receiveFromPeer(peerId: nodeId, entry: entry)
+
+            // Protocol metrics + cmb-accepted event
+            _metrics.cmbAccepted += 1
+            emit(.cmbAccepted(entry: entry))
+            emit(.metric(type: "cmb-accepted", detail: ["from": peerName, "key": entry.key]))
 
             let fieldLog = fieldDrifts.sorted(by: { $0.key.rawValue < $1.key.rawValue })
                 .map { "\($0.key.rawValue):\(String(format: "%.2f", $0.value))" }.joined(separator: " ")
