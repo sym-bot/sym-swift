@@ -508,8 +508,16 @@ public final class SymNode {
     ///   - originTimestamp: When the event happened (epoch ms). Defaults to now.
     /// - Returns: The stored ``SymMemoryEntry``.
     @discardableResult
-    public func remember(fields: [CMBField: CMBFieldVector], tags: [String] = [], parents: [CognitiveMemoryBlock] = [], originTimestamp: UInt64? = nil) -> SymMemoryEntry {
+    public func remember(fields: [CMBField: CMBFieldVector], tags: [String] = [], parents: [CognitiveMemoryBlock] = [], originTimestamp: UInt64? = nil) -> SymMemoryEntry? {
         let ts = originTimestamp ?? UInt64(Date().timeIntervalSince1970 * 1000)
+
+        // MMP Section 14.7: enforce remix requires new domain data.
+        // If parents are specified (this is a remix), the agent MUST have
+        // produced new domain observations since its last remix.
+        if !parents.isEmpty && !_hasNewDomainData {
+            logger.warning("[SYM] Remix rejected: no new domain data (MMP Section 14.7)")
+            return nil
+        }
 
         // Compute lineage from parents per MMP spec Section 14
         let lineage: CMBLineage? = parents.isEmpty ? nil : CMBLineage(
