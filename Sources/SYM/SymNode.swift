@@ -1263,6 +1263,12 @@ public final class SymNode {
 
         case .pong:
             break
+
+        case .error:
+            let code = frame.code ?? 0
+            let msg = frame.content ?? "unknown"
+            logger.warning("[SYM] error frame from \(peerName): \(code) \(msg)")
+            emit(.metric(type: "error-received", detail: ["code": "\(code)", "peer": peerName]))
         }
     }
 }

@@ -75,29 +75,31 @@ public struct E2EMetadata: Codable, Sendable {
 // MARK: - Frame Types
 
 /// SYM wire message types. Must match Node.js SymNode exactly.
-/// See MMP v0.2.0 Section 7 (Frame Types).
+/// See MMP v0.2.1 Section 7 (Frame Types).
 public enum SymFrameType: String, Codable, Sendable {
-    /// Identity exchange on connection. See MMP v0.2.0 Section 5.
+    /// Identity exchange on connection. See MMP v0.2.1 Section 5.
     case handshake = "handshake"
-    /// Cognitive state vector broadcast for coupling evaluation. See MMP v0.2.0 Section 5.
+    /// Cognitive state vector broadcast for coupling evaluation. See MMP v0.2.1 Section 5.
     case stateSync = "state-sync"
-    /// CMB memory share between peers. See MMP v0.2.0 Section 6.
+    /// CMB memory share between peers. See MMP v0.2.1 Section 6.
     case cmb = "cmb"
-    /// Mood signal broadcast. Crosses domain boundaries per MMP v0.2.0 Section 9.3.
+    /// Mood signal broadcast. Crosses domain boundaries per MMP v0.2.1 Section 9.3.
     case mood = "mood"
-    /// Free-form text message between peers. See MMP v0.2.0 Section 7.
+    /// Free-form text message between peers. See MMP v0.2.1 Section 7.
     case message = "message"
-    /// Declares this node's push token for P2P wake. See MMP v0.2.0 Section 5.
+    /// Declares this node's push token for P2P wake. See MMP v0.2.1 Section 5.
     case wakeChannel = "wake-channel"
-    /// P2P wake request sent out-of-band (handled by AppDelegate). See MMP v0.2.0 Section 5.
+    /// P2P wake request sent out-of-band (handled by AppDelegate). See MMP v0.2.1 Section 5.
     case wake = "wake"
-    /// xMesh insight from a peer agent's LNN. See MMP v0.2.0 Section 12.
+    /// xMesh insight from a peer agent's LNN. See MMP v0.2.1 Section 12.
     case xmeshInsight = "xmesh-insight"
-    /// Peer gossip — known peers and their wake channels. See MMP v0.2.0 Section 5.
+    /// Peer gossip — known peers and their wake channels. See MMP v0.2.1 Section 5.
     case peerInfo = "peer-info"
-    /// Heartbeat ping. See MMP v0.2.0 Section 5.
+    /// Protocol error. Codes 1xxx close connection; 2xxx informational. See MMP v0.2.1 Section 7.2.
+    case error = "error"
+    /// Heartbeat ping. See MMP v0.2.1 Section 5.
     case ping = "ping"
-    /// Heartbeat pong response. See MMP v0.2.0 Section 5.
+    /// Heartbeat pong response. See MMP v0.2.1 Section 5.
     case pong = "pong"
 }
 
@@ -113,10 +115,14 @@ public struct SymFrame: Codable, Sendable {
     public let type: SymFrameType
 
     // Handshake
-    /// Sender's node ID (used in handshake). See MMP v0.2.0 Section 3.
+    /// Sender's node ID (used in handshake). See MMP v0.2.1 Section 3.
     public var nodeId: String?
     /// Sender's display name (used in handshake).
     public var name: String?
+    /// MMP spec version implemented by this node (e.g. "0.2.1"). See MMP v0.2.1 Section 5.2.
+    public var version: String?
+    /// Supported protocol extensions (e.g. ["consent-v0.1"]). See MMP v0.2.1 Section 15.
+    public var extensions: [String]?
     /// Sender's Ed25519 identity public key (base64url). See MMP Section 3.1.3.
     public var publicKey: String?
     /// Sender's E2E public key (base64, Curve25519 raw 32 bytes) for key agreement.
@@ -170,7 +176,7 @@ public struct SymFrame: Codable, Sendable {
     public var e2e: E2EMetadata?
 
     private enum CodingKeys: String, CodingKey {
-        case type, nodeId, name, publicKey, e2ePublicKey
+        case type, nodeId, name, version, extensions, publicKey, e2ePublicKey
         case h1, h2, confidence
         case key, content, source, tags, originTimestamp, storedAt, timestamp
         case mood, context
@@ -179,6 +185,7 @@ public struct SymFrame: Codable, Sendable {
         case e2e = "_e2e"
         case trajectory, patterns, anomaly, outcome, coherence
         case platform, token, environment, reason
+        case code
         case peers
     }
 
@@ -204,8 +211,12 @@ public struct SymFrame: Codable, Sendable {
     /// Reason for a wake request (wake).
     public var reason: String?
 
+    // Error (MMP Section 7.2)
+    /// Error code. 1xxx = connection-level (close). 2xxx = evaluation-level (informational).
+    public var code: Int?
+
     // Peer info (gossip)
-    /// Known peers for gossip (peer-info). See MMP v0.2.0 Section 5.
+    /// Known peers for gossip (peer-info). See MMP v0.2.1 Section 5.
     public var peers: [SymPeerGossip]?
 
     /// Create a frame with the given type. All other fields default to nil.
@@ -220,8 +231,20 @@ public struct SymFrame: Codable, Sendable {
         var frame = SymFrame(type: .handshake)
         frame.nodeId = nodeId
         frame.name = name
+        frame.version = "0.2.1"
+        frame.extensions = []
         frame.publicKey = publicKey
         frame.e2ePublicKey = e2ePublicKey
+        return frame
+    }
+
+    /// Create an error frame. See MMP v0.2.1 Section 7.2.
+    /// Codes 1xxx close connection; codes 2xxx are informational.
+    static func error(code: Int, message: String, detail: String? = nil) -> SymFrame {
+        var frame = SymFrame(type: .error)
+        frame.code = code
+        frame.content = message
+        frame.reason = detail
         return frame
     }
 
