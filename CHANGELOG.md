@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.23
+
+### Changed
+- **SYMCore 0.2.0** — `SemanticEncoder` protocol for pluggable SVAF embeddings. Host apps (MeloTune) provide CoreML/ONNX semantic encoders. N-gram default preserved. Per-field evaluation quality bounded by encoder quality.
+
 ## 0.3.22
 
 ### Added
