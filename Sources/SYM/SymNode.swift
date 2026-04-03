@@ -1079,7 +1079,8 @@ public final class SymNode {
                     let anchorDecay = exp(-anchorAge / self.svafFreshnessSeconds)
                     let w = alphaF * max(cosSim, 0) * anchorDecay * anchor.confidence
 
-                    for d in 0..<weightedVec.count {
+                    let minDim = min(weightedVec.count, anchorField.vector.count)
+                    for d in 0..<minDim {
                         weightedVec[d] += w * anchorField.vector[d]
                     }
                     totalWeight += w
