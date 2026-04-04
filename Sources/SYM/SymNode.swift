@@ -33,8 +33,9 @@ public enum SymEvent {
     case couplingDecision(peer: String, decision: String, drift: Float)
     /// A memory was received from a peer, possibly fused via SVAF. See MMP v0.2.0 Section 6 and Section 9.
     case memoryReceived(from: String, content: String, decision: String?, cmb: CognitiveMemoryBlock?)
-    /// A peer's mood signal was accepted (drift within threshold). See MMP v0.2.0 Section 9.3.
-    case moodAccepted(from: String, mood: String, drift: Float)
+    /// A peer's mood signal was delivered (Section 9.3 + Section 13.9: mood-delivered).
+    /// Mood is always delivered from rejected CMBs — affect crosses all domain boundaries.
+    case moodDelivered(from: String, mood: String, drift: Float)
     /// A peer's mood signal was rejected (drift above threshold). See MMP v0.2.0 Section 9.3.
     case moodRejected(from: String, mood: String, drift: Float)
     /// A text message was received from a peer. See MMP v0.2.0 Section 7.
@@ -1199,7 +1200,7 @@ public final class SymNode {
             // memory sharing (0.5). User wellbeing crosses domain boundaries.
             if drift <= moodThreshold {
                 logger.info("[SYM] mood: from \(from): \"\(mood.prefix(50))\" → ACCEPTED (drift: \(String(format: "%.2f", drift)) ≤ threshold \(String(format: "%.1f", self.moodThreshold))) — passing to music pipeline")
-                emit(.moodAccepted(from: from, mood: mood, drift: drift))
+                emit(.moodDelivered(from: from, mood: mood, drift: drift))
             } else {
                 logger.info("[SYM] mood: from \(from): \"\(mood.prefix(50))\" → IGNORED (drift: \(String(format: "%.2f", drift)) > threshold \(String(format: "%.1f", self.moodThreshold))) — mood too distant from our cognitive profile")
                 emit(.moodRejected(from: from, mood: mood, drift: drift))
