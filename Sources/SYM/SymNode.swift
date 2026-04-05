@@ -1174,7 +1174,7 @@ public final class SymNode {
             // Protocol metrics + cmb-accepted event
             _metrics.cmbAccepted += 1
             let isAnchor = frame.isAnchor ?? false
-            let isRemix = fusedCMB.lineage?.parents?.isEmpty == false
+            let isRemix = fusedCMB.lineage?.parents.isEmpty == false
             emit(.cmbAccepted(entry: entry, isAnchor: isAnchor, isRemix: isRemix))
             emit(.metric(type: "cmb-accepted", detail: ["from": peerName, "key": entry.key]))
 
