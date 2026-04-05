@@ -47,8 +47,11 @@ public enum SymEvent {
     /// h1/h2 are CfC hidden state vectors for neural coupling. See MMP v0.2.0 Section 5.
     case stateSyncReceived(from: String, h1: [Float], h2: [Float], confidence: Float)
     /// A peer CMB was accepted by SVAF and stored. Application layer can remix.
-    /// Per MMP v0.2.0 Section 14: remix only when agent has new domain data.
-    case cmbAccepted(entry: SymMemoryEntry)
+    /// Per MMP v0.2.1 Section 14: remix only when agent has new domain data.
+    /// Check `isAnchor` and `isRemix` before calling LLM for remix:
+    /// - `isAnchor`: historical CMB replayed on peer reconnect — not a new signal
+    /// - `isRemix`: CMB with lineage parents — re-remixing causes cascade storms
+    case cmbAccepted(entry: SymMemoryEntry, isAnchor: Bool = false, isRemix: Bool = false)
     /// Protocol-level metric event for observability.
     case metric(type: String, detail: [String: String])
 }
@@ -1170,7 +1173,9 @@ public final class SymNode {
 
             // Protocol metrics + cmb-accepted event
             _metrics.cmbAccepted += 1
-            emit(.cmbAccepted(entry: entry))
+            let isAnchor = frame.isAnchor ?? false
+            let isRemix = fusedCMB.lineage?.parents?.isEmpty == false
+            emit(.cmbAccepted(entry: entry, isAnchor: isAnchor, isRemix: isRemix))
             emit(.metric(type: "cmb-accepted", detail: ["from": peerName, "key": entry.key]))
 
             let fieldLog = fieldDrifts.sorted(by: { $0.key.rawValue < $1.key.rawValue })

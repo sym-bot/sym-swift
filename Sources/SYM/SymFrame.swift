@@ -175,6 +175,11 @@ public struct SymFrame: Codable, Sendable {
     /// Wire format: `_e2e: { nonce: "base64..." }`.
     public var e2e: E2EMetadata?
 
+    /// Anchor flag — true when this CMB is a historical replay sent on peer reconnect.
+    /// Receiving agents SHOULD NOT remix anchor CMBs (they are context, not new signals).
+    /// See MMP v0.2.1 Section 13.6.
+    public var isAnchor: Bool?
+
     private enum CodingKeys: String, CodingKey {
         case type, nodeId, name, version, extensions, publicKey, e2ePublicKey
         case h1, h2, confidence
@@ -183,6 +188,7 @@ public struct SymFrame: Codable, Sendable {
         case from, fromName
         case cmb, encryptedFields
         case e2e = "_e2e"
+        case isAnchor = "_anchor"
         case trajectory, patterns, anomaly, outcome, coherence
         case platform, token, environment, reason
         case code
