@@ -7,7 +7,7 @@ Your app sees workouts. Claude Code sees fatigue. MeloTune sees a skipped playli
 SYM Swift is the native SDK for the [Mesh Memory Protocol (MMP)](https://sym.bot/spec/mmp). Add the package, wire in a service class, and your app joins the mesh alongside Claude Code and any other SYM agent on the local network. No servers, no APIs, no integration code.
 
 [![Swift](https://img.shields.io/badge/Swift_SPM-compatible-orange)](https://github.com/sym-bot/sym-swift)
-[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.1-purple)](https://sym.bot/spec/mmp)
+[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.2-purple)](https://sym.bot/spec/mmp)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![CI](https://github.com/sym-bot/sym-swift/actions/workflows/ci.yml/badge.svg)](https://github.com/sym-bot/sym-swift/actions/workflows/ci.yml)
 [![中文文档](https://img.shields.io/badge/语言-中文-red)](README_zh.md)

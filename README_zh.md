@@ -7,7 +7,7 @@
 SYM Swift 是 [Mesh Memory Protocol (MMP)](https://sym.bot/spec/mmp) 的原生 SDK。添加 package，接入一个 service 类，你的应用就能和 Claude Code 以及本地网络上的任何 SYM Agent 协作。无需服务器，无需 API，无需对接代码。
 
 [![Swift](https://img.shields.io/badge/Swift_SPM-compatible-orange)](https://github.com/sym-bot/sym-swift)
-[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.1-purple)](https://sym.bot/spec/mmp)
+[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.2-purple)](https://sym.bot/spec/mmp)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![CI](https://github.com/sym-bot/sym-swift/actions/workflows/ci.yml/badge.svg)](https://github.com/sym-bot/sym-swift/actions/workflows/ci.yml)
 [![English](https://img.shields.io/badge/lang-English-blue)](README.md)
