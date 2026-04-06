@@ -267,6 +267,14 @@ public final class SymNode {
     /// Track last coupling decision per peer — only log/emit on change.
     private var lastCouplingDecisions: [String: String] = [:]
 
+    /// Section 3.5 + 11.1: peer lifecycle roles from handshake.
+    /// Used to apply validator-origin anchor weight 2.0 (Section 6.4).
+    private var peerLifecycleRoles: [String: String] = [:]
+
+    /// Section 6.4: CMB keys from validator/anchor nodes — anchor weight multiplier 2.0.
+    /// Can't add property to CMBStoreEntry (binary framework), so track externally.
+    private var validatorOriginKeys: Set<String> = []
+
     /// Event handlers. Access only via stateQueue.
     private var eventHandlers: [(SymEvent) -> Void] = []
 
@@ -831,7 +839,7 @@ public final class SymNode {
         }
 
         // Send handshake + cognitive state + wake channel
-        session.send(.handshake(nodeId: identity.nodeId, name: name, publicKey: identity.publicKey, e2ePublicKey: e2ePublicKeyB64))
+        session.send(.handshake(nodeId: identity.nodeId, name: name, publicKey: identity.publicKey, e2ePublicKey: e2ePublicKeyB64, lifecycleRole: "observer"))
         let (h1, h2) = meshNode.coupledState()
         session.send(.stateSync(h1: h1, h2: h2, confidence: 0.8))
         if let wc = wakeChannel {
@@ -871,7 +879,7 @@ public final class SymNode {
         }
 
         // Send handshake + cognitive state + wake channel via relay
-        relaySession?.send(.handshake(nodeId: identity.nodeId, name: name, publicKey: identity.publicKey, e2ePublicKey: e2ePublicKeyB64), to: nodeId)
+        relaySession?.send(.handshake(nodeId: identity.nodeId, name: name, publicKey: identity.publicKey, e2ePublicKey: e2ePublicKeyB64, lifecycleRole: "observer"), to: nodeId)
         let (h1, h2) = meshNode.coupledState()
         relaySession?.send(.stateSync(h1: h1, h2: h2, confidence: 0.8), to: nodeId)
         if let wc = wakeChannel {
@@ -969,6 +977,10 @@ public final class SymNode {
                 } else {
                     logger.warning("[SYM] e2e: failed to derive shared secret with \(peerName)")
                 }
+            }
+            // Section 3.5 + 6.4: store peer lifecycle role for validator-origin weight
+            if let role = frame.lifecycleRole {
+                peerQueue.sync { self.peerLifecycleRoles[nodeId] = role }
             }
             break
 
@@ -1081,7 +1093,9 @@ public final class SymNode {
                     let cosSim = CMBEncoder.cosineSimilarity(incomingField.vector, anchorField.vector)
                     let anchorAge = now >= anchor.storedAt ? Float(now - anchor.storedAt) / 1000.0 : 0.0
                     let anchorDecay = exp(-anchorAge / self.svafFreshnessSeconds)
-                    let w = alphaF * max(cosSim, 0) * anchorDecay * anchor.confidence
+                    // Section 6.4: validator-origin CMBs have anchor weight 2.0
+                    let validatorMultiplier: Float = validatorOriginKeys.contains(anchor.key) ? 2.0 : 1.0
+                    let w = alphaF * max(cosSim, 0) * anchorDecay * anchor.confidence * validatorMultiplier
 
                     let minDim = min(weightedVec.count, anchorField.vector.count)
                     for d in 0..<minDim {
@@ -1159,8 +1173,12 @@ public final class SymNode {
             )
 
             // 8. Store the FUSED entry (not the original)
+            // Section 6.4 + 11.1: validator/anchor-origin CMBs enter at weight 2.0
+            let creatorRole: String = peerQueue.sync { self.peerLifecycleRoles[nodeId] ?? "observer" }
+            let isValidatorOrigin = creatorRole == "validator" || creatorRole == "anchor"
+
             let fusedContent = CMBEncoder.renderContent(from: fusedCMB)
-            let entry = SymMemoryEntry(
+            var entry = SymMemoryEntry(
                 key: frame.key ?? "memory-\(now)",
                 content: fusedContent,
                 source: fusedCMB.source,
@@ -1169,6 +1187,9 @@ public final class SymNode {
                 storedAt: now,
                 cmb: fusedCMB
             )
+            if isValidatorOrigin {
+                validatorOriginKeys.insert(entry.key)
+            }
             store.receiveFromPeer(peerId: nodeId, entry: entry)
 
             // Protocol metrics + cmb-accepted event

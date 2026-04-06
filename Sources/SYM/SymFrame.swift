@@ -128,6 +128,9 @@ public struct SymFrame: Codable, Sendable {
     /// Sender's E2E public key (base64, Curve25519 raw 32 bytes) for key agreement.
     /// Present in handshake frames when E2E encryption is supported.
     public var e2ePublicKey: String?
+    /// Sender's lifecycle role (observer/validator/anchor). See MMP v0.2.2 Section 3.5.
+    /// Validator/anchor-origin CMBs enter at anchor weight 2.0 (Section 6.4).
+    public var lifecycleRole: String?
 
     // State sync
     /// CfC hidden state vector 1 (state-sync). See MMP v0.2.0 Section 5.
@@ -181,7 +184,7 @@ public struct SymFrame: Codable, Sendable {
     public var isAnchor: Bool?
 
     private enum CodingKeys: String, CodingKey {
-        case type, nodeId, name, version, extensions, publicKey, e2ePublicKey
+        case type, nodeId, name, version, extensions, publicKey, e2ePublicKey, lifecycleRole
         case h1, h2, confidence
         case key, content, source, tags, originTimestamp, storedAt, timestamp
         case mood, context
@@ -233,14 +236,15 @@ public struct SymFrame: Codable, Sendable {
 
     // MARK: - Factory Methods
 
-    static func handshake(nodeId: String, name: String, publicKey: String? = nil, e2ePublicKey: String? = nil) -> SymFrame {
+    static func handshake(nodeId: String, name: String, publicKey: String? = nil, e2ePublicKey: String? = nil, lifecycleRole: String = "observer") -> SymFrame {
         var frame = SymFrame(type: .handshake)
         frame.nodeId = nodeId
         frame.name = name
-        frame.version = "0.2.1"
+        frame.version = "0.2.2"
         frame.extensions = []
         frame.publicKey = publicKey
         frame.e2ePublicKey = e2ePublicKey
+        frame.lifecycleRole = lifecycleRole
         return frame
     }
 
