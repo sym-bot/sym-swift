@@ -2,6 +2,11 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.56
+
+### Fixed
+- Cleaned up 3 Swift build warnings — `swift build` now zero-warning. No API change. SYMCore xcframework unchanged from 0.3.55.
+
 ## 0.3.55
 
 ### Changed
