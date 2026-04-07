@@ -1055,7 +1055,6 @@ public final class SymNode {
             let fieldCount = incomingCMB.fields.count
             let moodText = incomingCMB.fields[.mood]?.text ?? "none"
             logger.info("[SYM] cmb: received CMB \(incomingCMB.key.prefix(20)) from \(peerName) (\(fieldCount) fields, mood: \(moodText))")
-            let content = CMBEncoder.renderContent(from: incomingCMB)
 
             // ── SVAF v2: Per-Field CMB Fusion ──────────────────────
             // MMP v0.2.0 Section 9: λ_j = α_f · cos(x_new, x_j) · g(l_j) · exp(-λ(t_now - t_j)) · c_j
@@ -1178,7 +1177,7 @@ public final class SymNode {
             let isValidatorOrigin = creatorRole == "validator" || creatorRole == "anchor"
 
             let fusedContent = CMBEncoder.renderContent(from: fusedCMB)
-            var entry = SymMemoryEntry(
+            let entry = SymMemoryEntry(
                 key: frame.key ?? "memory-\(now)",
                 content: fusedContent,
                 source: fusedCMB.source,

@@ -139,7 +139,11 @@ private enum AnyCodableValue: Codable {
 ///   5. Relay notifies peer-joined/peer-left events
 ///
 /// The relay is dumb transport — all coupling decisions remain on-device.
-final class SymRelaySession {
+/// `@unchecked Sendable`: all mutable state is accessed exclusively via the
+/// serial `queue` below. The compiler cannot prove this invariant, so we
+/// assert it manually. Any new stored property MUST be either immutable or
+/// mediated by `queue.sync` / `queue.async`.
+final class SymRelaySession: @unchecked Sendable {
 
     // MARK: - Properties
 
