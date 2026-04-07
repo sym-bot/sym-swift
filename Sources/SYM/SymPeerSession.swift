@@ -67,7 +67,20 @@ final class SymPeerSession {
     private let queue: DispatchQueue
     private let parser = SymFrameParser()
     private var heartbeatTask: Task<Void, Never>?
+    private var handshakeTimeoutTask: Task<Void, Never>?
     private let logger = Logger(subsystem: "bot.sym", category: "PeerSession")
+
+    /// For outbound discovery sessions: the nodeId we expect to reach.
+    /// Set by `SymNode` after init, before `start()`. Used to dedup
+    /// concurrent connect attempts to the same peer in `SymNode`'s
+    /// `pendingOutboundNodeIds` set.
+    var outboundTargetNodeId: String?
+
+    /// Time after which a session that has not completed its handshake
+    /// is forcibly disconnected. Catches stale Bonjour records pointing
+    /// at unreachable peers — without this, the OS TCP default of ~75s
+    /// keeps the failed flow alive and stacks up.
+    static let handshakeTimeout: TimeInterval = 10
 
     weak var delegate: SymPeerSessionDelegate?
 
@@ -105,6 +118,7 @@ final class SymPeerSession {
 
     deinit {
         heartbeatTask?.cancel()
+        handshakeTimeoutTask?.cancel()
         connection.cancel()
     }
 
@@ -116,6 +130,18 @@ final class SymPeerSession {
             self?.handleConnectionState(state)
         }
         connection.start(queue: queue)
+
+        // Arm the handshake timeout. If `_isActive` is still false after
+        // `handshakeTimeout` seconds, the peer never completed handshake
+        // (unreachable, wrong protocol, stale Bonjour record) — tear down.
+        let timeout = Self.handshakeTimeout
+        handshakeTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            guard let self, !Task.isCancelled, !self.isActive else { return }
+            self.logger.warning("[SYM] session: handshake timeout after \(Int(timeout))s — disconnecting")
+            self.notifyDisconnect(reason: "Handshake timeout")
+            self.connection.cancel()
+        }
     }
 
     /// Gracefully disconnect.
@@ -190,6 +216,7 @@ final class SymPeerSession {
             stateQueue.async { [self] in _peerNodeId = nodeId }
             stateQueue.async { [self] in _peerName = name }
             stateQueue.async { [self] in _isActive = true }
+            handshakeTimeoutTask?.cancel()
             startHeartbeat()
             logger.info("[SYM] session: handshake complete with \(name) (\(nodeId.prefix(8)))")
             delegate?.session(self, didHandshakeWith: nodeId, name: name)
@@ -278,6 +305,7 @@ final class SymPeerSession {
         }
         guard shouldNotify else { return }
         heartbeatTask?.cancel()
+        handshakeTimeoutTask?.cancel()
         delegate?.session(self, didDisconnectWith: reason)
     }
 }

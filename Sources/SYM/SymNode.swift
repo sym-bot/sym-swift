@@ -264,6 +264,14 @@ public final class SymNode {
     /// Access only via peerQueue.
     private var pendingSessions: [ObjectIdentifier: SymPeerSession] = [:]
 
+    /// NodeIds for which an outbound discovery session is currently in
+    /// flight (created but not yet handshaked or torn down). Used to
+    /// dedup `discoveryDidFindPeer` callbacks that fire repeatedly for
+    /// the same peer (mDNS `.changed` events, transient remove+re-add)
+    /// and to look up pending sessions when the peer goes away.
+    /// Mutated only under `peerQueue`.
+    private var pendingOutboundNodeIds: Set<String> = []
+
     /// Track last coupling decision per peer — only log/emit on change.
     private var lastCouplingDecisions: [String: String] = [:]
 
@@ -1305,11 +1313,20 @@ public final class SymNode {
 extension SymNode: SymDiscoveryDelegate {
 
     func discoveryDidFindPeer(nodeId: String, name: String, browseResult: NWBrowser.Result) {
-        let exists: Bool = peerQueue.sync { self.peers[nodeId] != nil }
-        guard !exists else { return }
+        // Dedup against both already-handshaked peers AND in-flight outbound
+        // attempts. Bonjour `.changed` events fire repeatedly for the same
+        // peer; without this guard each one spawns a fresh NWConnection.
+        let shouldConnect: Bool = peerQueue.sync {
+            guard self.peers[nodeId] == nil else { return false }
+            guard !self.pendingOutboundNodeIds.contains(nodeId) else { return false }
+            self.pendingOutboundNodeIds.insert(nodeId)
+            return true
+        }
+        guard shouldConnect else { return }
 
         logger.info("[SYM] peer: connecting to \(name) via service endpoint")
         let session = SymPeerSession(outboundTo: browseResult.endpoint, identity: identity)
+        session.outboundTargetNodeId = nodeId
         session.delegate = self
         // Retain until handshake identifies the peer
         let key = ObjectIdentifier(session)
@@ -1318,8 +1335,19 @@ extension SymNode: SymDiscoveryDelegate {
     }
 
     func discoveryDidLosePeer(nodeId: String) {
-        // Don't tear down active sessions on Bonjour removal —
-        // mDNS sends transient remove+re-add. Heartbeat handles real loss.
+        // Active handshaked sessions are left alone — heartbeat detects real
+        // loss and mDNS sends transient remove+re-add events that we don't
+        // want to thrash on. But pending unhandshaked outbound attempts to
+        // a peer that just left the network should be cancelled immediately
+        // so we stop banging on a dead endpoint for the full TCP timeout.
+        let pending: SymPeerSession? = peerQueue.sync {
+            guard self.pendingOutboundNodeIds.contains(nodeId) else { return nil }
+            return self.pendingSessions.values.first { $0.outboundTargetNodeId == nodeId }
+        }
+        if let pending {
+            logger.info("[SYM] peer: cancelling pending connect to \(nodeId.prefix(8)) — Bonjour removed")
+            pending.disconnect()
+        }
     }
 
     func discoveryDidAcceptConnection(_ connection: NWConnection) {
@@ -1337,9 +1365,17 @@ extension SymNode: SymDiscoveryDelegate {
 extension SymNode: SymPeerSessionDelegate {
 
     func session(_ session: SymPeerSession, didHandshakeWith nodeId: String, name: String) {
-        // Release from pending (inbound sessions)
+        // Release from pending (both inbound and outbound) and clear
+        // the in-flight outbound dedup entry now that the handshake
+        // either confirmed the expected nodeId or revealed a different one.
         let key = ObjectIdentifier(session)
-        peerQueue.sync { _ = self.pendingSessions.removeValue(forKey: key) }
+        peerQueue.sync {
+            _ = self.pendingSessions.removeValue(forKey: key)
+            if let target = session.outboundTargetNodeId {
+                self.pendingOutboundNodeIds.remove(target)
+            }
+            self.pendingOutboundNodeIds.remove(nodeId)
+        }
 
         addPeer(session, nodeId: nodeId, peerName: name, isOutbound: session.isOutbound)
     }
@@ -1350,9 +1386,15 @@ extension SymNode: SymPeerSessionDelegate {
     }
 
     func session(_ session: SymPeerSession, didDisconnectWith reason: String) {
-        // Release from pending if never handshaked
+        // Release from pending if never handshaked, and clear the outbound
+        // dedup entry so a future Bonjour event can attempt a fresh connect.
         let key = ObjectIdentifier(session)
-        peerQueue.sync { _ = self.pendingSessions.removeValue(forKey: key) }
+        peerQueue.sync {
+            _ = self.pendingSessions.removeValue(forKey: key)
+            if let target = session.outboundTargetNodeId {
+                self.pendingOutboundNodeIds.remove(target)
+            }
+        }
 
         guard let nodeId = session.peerNodeId else { return }
         // Section 4.6 + 5.5: remove Bonjour transport only — peer survives if relay exists

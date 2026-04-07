@@ -2,6 +2,11 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.58
+
+### Fixed
+- Discovery → connection layer no longer hammers stale Bonjour endpoints. Outbound discovery now dedups by nodeId across pending sessions, `discoveryDidLosePeer` cancels pending unhandshaked attempts for that peer, and every session has a 10s handshake timeout. Eliminates the cascade of failed `NWConnection`s to peers that left the LAN or never came up. SYMCore xcframework unchanged from 0.3.55.
+
 ## 0.3.57
 
 ### Fixed
