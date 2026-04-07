@@ -2,6 +2,11 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.57
+
+### Fixed
+- `SymPeerSession`: cancel `NWConnection` promptly on `.failed` and on receive-error disconnect, and gate disconnect notification through an idempotent path. Eliminates `nw_endpoint_flow_failed_with_error ... already failing, returning` log spam from unreachable peers and stops the upstream `SymNode` from cleaning up the same peer twice. SYMCore xcframework unchanged from 0.3.55.
+
 ## 0.3.56
 
 ### Fixed

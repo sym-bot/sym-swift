@@ -56,6 +56,11 @@ final class SymPeerSession {
     private var _lastSeen = Date()
     var lastSeen: Date { stateQueue.sync { _lastSeen } }
 
+    /// True after the session has emitted its terminal disconnect notification.
+    /// Guards against double-notify when both `stateUpdateHandler(.failed)` and
+    /// the in-flight `readChunk` receive completion fire for the same failure.
+    private var _didNotifyDisconnect = false
+
     private let connection: NWConnection
     private let identity: SymIdentity
     let isOutbound: Bool
@@ -205,14 +210,14 @@ final class SymPeerSession {
 
         case .failed(let error):
             logger.error("[SYM] session: connection failed: \(error.localizedDescription)")
-            stateQueue.async { [self] in _isActive = false }
-            heartbeatTask?.cancel()
-            delegate?.session(self, didDisconnectWith: error.localizedDescription)
+            // Release Apple's underlying nw_endpoint_flow now. Without this
+            // cancel, the failed flow lingers and any later cleanup logs
+            // "nw_endpoint_flow_failed_with_error ... already failing, returning".
+            connection.cancel()
+            notifyDisconnect(reason: error.localizedDescription)
 
         case .cancelled:
-            stateQueue.async { [self] in _isActive = false }
-            heartbeatTask?.cancel()
-            delegate?.session(self, didDisconnectWith: "Connection cancelled")
+            notifyDisconnect(reason: "Connection cancelled")
 
         case .waiting(let error):
             logger.info("[SYM] session: connection waiting: \(error.localizedDescription)")
@@ -249,10 +254,30 @@ final class SymPeerSession {
     // MARK: - Disconnect
 
     private func handleDisconnect(error: NWError?) {
-        stateQueue.async { [self] in _isActive = false }
-        heartbeatTask?.cancel()
+        // Receive completion fired with EOF or error. Cancel the connection
+        // so Apple's flow object is released; the resulting `.cancelled`
+        // state will reach `handleConnectionState`, but `notifyDisconnect`
+        // is idempotent so the delegate is still only called once.
+        connection.cancel()
         let reason = error?.localizedDescription ?? "Connection closed"
         logger.info("[SYM] session: disconnected: \(reason)")
+        notifyDisconnect(reason: reason)
+    }
+
+    /// Idempotent terminal disconnect. Only the first caller emits the
+    /// delegate notification and tears down session state; subsequent
+    /// callers are no-ops. This collapses the two failure paths
+    /// (`stateUpdateHandler(.failed)` + `readChunk` error completion)
+    /// into one upstream notification.
+    private func notifyDisconnect(reason: String) {
+        let shouldNotify: Bool = stateQueue.sync {
+            guard !_didNotifyDisconnect else { return false }
+            _didNotifyDisconnect = true
+            _isActive = false
+            return true
+        }
+        guard shouldNotify else { return }
+        heartbeatTask?.cancel()
         delegate?.session(self, didDisconnectWith: reason)
     }
 }
