@@ -2,6 +2,11 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.59
+
+### Fixed
+- **SYMCore 0.3.7** — fixes hard `EXC_BAD_ACCESS` crash in `SemanticCoupler.pruneExpired()` / `NeuralCoupler.pruneExpired()` under multi-peer load. Both couplers had concurrent dictionary mutation and missing locks on read paths. Affects any consumer with more than 1 active peer session (which is essentially all real deployments).
+
 ## 0.3.58
 
 ### Fixed
