@@ -44,7 +44,13 @@ public enum SymEvent {
     /// Contains trajectory, patterns, anomaly score, predicted outcome. See MMP v0.2.0 Section 12.
     case xmeshInsight(from: String, trajectory: [Float], patterns: [Float], anomaly: Float, outcome: String, coherence: Float)
     /// Peer's cognitive state received via state-sync frame.
-    /// h1/h2 are CfC hidden state vectors for neural coupling. See MMP v0.2.0 Section 5.
+    /// **DEPRECATED in MMP v0.2.2.** Legacy hidden-state receive event.
+    /// Hidden states never cross the wire under SVAF (Xu, 2026, §3.4); MMP
+    /// v0.2.2 senders MUST NOT emit `state-sync` frames. This event is
+    /// retained on the API surface only for backwards source compatibility
+    /// and is no longer fired by the receiver. Subscribe to
+    /// ``cmbAccepted`` or ``memoryReceived`` for cognitive signal events.
+    @available(*, deprecated, message: "MMP v0.2.2: hidden states do not cross the wire. Subscribe to .cmbAccepted or .memoryReceived instead.")
     case stateSyncReceived(from: String, h1: [Float], h2: [Float], confidence: Float)
     /// A peer CMB was accepted by SVAF and stored. Application layer can remix.
     /// Per MMP v0.2.1 Section 14: remix only when agent has new domain data.
@@ -298,8 +304,10 @@ public final class SymNode {
     /// Periodic re-encode timer (30s — re-encodes context and broadcasts).
     private var encodeTimer: Timer?
 
-    /// Periodic state-sync timer (configurable — broadcasts current hidden state to peers).
-    /// Enables real-time neural coupling when set to a short interval (e.g. 1s).
+    /// **DEPRECATED in MMP v0.2.2.** Periodic state-sync timer. Hidden
+    /// states never cross the wire under SVAF (Xu, 2026, §3.4); the timer
+    /// is no longer scheduled and `stateSyncInterval` is a no-op preserved
+    /// for source compatibility.
     private var stateSyncTimer: Timer?
     private let stateSyncInterval: TimeInterval
 
@@ -359,8 +367,11 @@ public final class SymNode {
     ///     legal (per jurisdiction), health (HIPAA 6yr), finance (MiFID II 5yr, SEC 7yr).
     ///   - store: Custom CMB storage implementation. Defaults to file-based storage.
     ///     Pass a read-only CMBStore for audit agents that observe without modifying.
-    ///   - stateSyncInterval: Seconds between state-sync broadcasts to peers (default 0, disabled).
-    ///     Set to 1.0 for real-time neural coupling. 0 means state is only sent on handshake and re-encode.
+    ///   - stateSyncInterval: **DEPRECATED in MMP v0.2.2.** No-op. Hidden
+    ///     states never cross the wire under SVAF (Xu, 2026, §3.4).
+    ///     Cognitive coupling propagates as CMBs via ``remember(fields:tags:parents:originTimestamp:)``;
+    ///     this parameter is preserved on the API surface only for source
+    ///     compatibility with MMP v0.2.0/v0.2.1 clients.
     ///   - relay: WebSocket relay URL for internet-scale mesh (e.g. `wss://sym-relay.onrender.com`).
     ///   - relayToken: Shared secret for relay authentication.
     ///   - relayOnly: If true, skip Bonjour discovery and only use the relay.
@@ -432,13 +443,20 @@ public final class SymNode {
         return parts.joined(separator: "\n")
     }
 
+    /// Periodic re-encoding of the local cognitive state from accumulated
+    /// memory. Updates the local CfC's hidden state in-place; **never**
+    /// broadcasts it. Cognitive signals propagate to peers only as CMBs via
+    /// ``remember(fields:tags:parents:originTimestamp:)``.
     private func reencodeAndBroadcast() {
         let context = buildContext()
         guard context.count > 5 else { return }
 
         let (h1, h2) = ContextEncoder.encode(context)
         meshNode.updateLocalState(h1, h2, confidence: 0.8)
-        broadcastCurrentState()
+        // MMP v0.2.2: do not broadcast hidden state. SVAF (Xu, 2026, §3.4)
+        // requires that hidden states stay private to each agent. The local
+        // state update above is sufficient for the local CfC to evaluate
+        // future incoming CMBs at SVAF Layer 4.
     }
 
     // MARK: - Lifecycle
@@ -468,12 +486,13 @@ public final class SymNode {
             self?.reencodeAndBroadcast()
         }
 
-        // Real-time state sync for neural coupling (if configured)
-        if stateSyncInterval > 0 {
-            stateSyncTimer = Timer.scheduledTimer(withTimeInterval: stateSyncInterval, repeats: true) { [weak self] _ in
-                self?.broadcastCurrentState()
-            }
-        }
+        // MMP v0.2.2: the periodic state-sync broadcast is removed. Hidden
+        // states never cross the wire under SVAF (Xu, 2026, §3.4). The
+        // `stateSyncInterval` constructor parameter is preserved for
+        // source-compatibility but is now a no-op. A v0.2.0 peer that still
+        // sends state-sync frames will have those frames silently dropped
+        // by the receive handler.
+        _ = stateSyncInterval  // intentionally unused
 
         // Retention purge — run on start + every hour
         store.purge(retentionSeconds: retentionSeconds)
@@ -648,14 +667,19 @@ public final class SymNode {
         return store.search(query: query)
     }
 
-    // MARK: - State Sync
+    // MARK: - State Sync (DEPRECATED)
 
-    /// Broadcast current cognitive state to all peers.
-    /// Called periodically when stateSyncInterval > 0 for real-time neural coupling.
-    /// Also called by reencodeAndBroadcast() after context re-encoding.
+    /// **DEPRECATED in MMP v0.2.2.** No-op. Hidden states never cross the
+    /// wire under SVAF (Xu, 2026, *Symbolic-Vector Attention Fusion for
+    /// Collective Intelligence*, arXiv:2604.03955, §3.4). Cognitive signals
+    /// propagate as CMBs via ``remember(fields:tags:parents:originTimestamp:)``;
+    /// the receiver evaluates them per-field at SVAF Layer 4 and the local
+    /// CfC at Layer 6 integrates the fused fields. The `state-sync` frame
+    /// type is preserved on the wire only so that v0.2.0 peers do not break
+    /// the parser.
+    @available(*, deprecated, message: "MMP v0.2.2: hidden states do not cross the wire. Call remember(fields:) to broadcast a CMB.")
     public func broadcastCurrentState() {
-        let (h1, h2) = meshNode.coupledState()
-        broadcastToPeers(.stateSync(h1: h1, h2: h2, confidence: 0.8))
+        // Intentionally a no-op. See doc comment.
     }
 
     // MARK: - Mood
@@ -846,10 +870,12 @@ public final class SymNode {
             return true
         }
 
-        // Send handshake + cognitive state + wake channel
+        // Send handshake + wake channel. MMP v0.2.2: no state-sync — hidden
+        // states never cross the wire (SVAF, Xu 2026, §3.4). Cognitive
+        // bootstrap to a freshly-connected peer happens via the next CMB
+        // produced by `remember(fields:)`, evaluated by the peer's SVAF
+        // Layer 4 against its anchor memory.
         session.send(.handshake(nodeId: identity.nodeId, name: name, publicKey: identity.publicKey, e2ePublicKey: e2ePublicKeyB64, lifecycleRole: "observer"))
-        let (h1, h2) = meshNode.coupledState()
-        session.send(.stateSync(h1: h1, h2: h2, confidence: 0.8))
         if let wc = wakeChannel {
             session.send(.wakeChannel(platform: wc.platform, token: wc.token, environment: wc.environment))
         }
@@ -886,10 +912,9 @@ public final class SymNode {
             return true
         }
 
-        // Send handshake + cognitive state + wake channel via relay
+        // Send handshake + wake channel via relay. MMP v0.2.2: no state-sync —
+        // hidden states never cross the wire (SVAF, Xu 2026, §3.4).
         relaySession?.send(.handshake(nodeId: identity.nodeId, name: name, publicKey: identity.publicKey, e2ePublicKey: e2ePublicKeyB64, lifecycleRole: "observer"), to: nodeId)
-        let (h1, h2) = meshNode.coupledState()
-        relaySession?.send(.stateSync(h1: h1, h2: h2, confidence: 0.8), to: nodeId)
         if let wc = wakeChannel {
             relaySession?.send(.wakeChannel(platform: wc.platform, token: wc.token, environment: wc.environment), to: nodeId)
         }
@@ -993,34 +1018,14 @@ public final class SymNode {
             break
 
         case .stateSync:
-            guard let h1 = frame.h1, let h2 = frame.h2,
-                  h1.count == ContextEncoder.dim, h2.count == ContextEncoder.dim else { break }
-
-            meshNode.addPeer(id: nodeId, h1: h1, h2: h2, confidence: frame.confidence ?? 0.5)
-            _ = meshNode.coupledState()
-
-            // Emit raw state-sync for consumers (e.g. neural coupling engine)
-            emit(.stateSyncReceived(from: peerName, h1: h1, h2: h2, confidence: frame.confidence ?? 0.5))
-
-            if let d = meshNode.couplingDecisions[nodeId] {
-                let prev = lastCouplingDecisions[nodeId]
-                if prev != d.decision.rawValue {
-                    lastCouplingDecisions[nodeId] = d.decision.rawValue
-                    let context: String
-                    switch d.decision {
-                    case .aligned:
-                        context = "cognitive states are similar — memories and mood will be shared"
-                    case .guarded:
-                        context = "partially related context — sharing with caution"
-                    case .rejected:
-                        context = "different cognitive domains — no state blending, CMB mood field still delivered (MMP v0.2.0 Section 9.3)"
-                    @unknown default:
-                        context = "unknown coupling state"
-                    }
-                    logger.info("[SYM] coupling:: \(peerName) → \(d.decision.rawValue) (drift: \(String(format: "%.2f", d.drift)), threshold: 0.50) — \(context)")
-                    emit(.couplingDecision(peer: peerName, decision: d.decision.rawValue, drift: d.drift))
-                }
-            }
+            // MMP v0.2.2: state-sync is deprecated. Hidden states never cross
+            // the wire under SVAF (Xu, 2026, §3.4). Frames received from
+            // older v0.2.0 peers are silently dropped — they are NOT fed
+            // into the local CfC and the deprecated `.stateSyncReceived`
+            // event is NOT emitted. The peer's mood and other cognitive
+            // signals will arrive on the canonical `.cmb` channel.
+            logger.info("[SYM] state-sync: dropping deprecated frame from \(peerName) (MMP v0.2.0; upgrade peer to v0.2.2+)")
+            break
 
         case .cmb:
             // Detect encrypted CMB: encryptedFields present with _e2e nonce
@@ -1214,8 +1219,21 @@ public final class SymNode {
         case .mood:
             guard let mood = frame.mood else { break }
 
-            // Use the SDK's coupling engine to evaluate whether this mood
-            // is relevant to our cognitive state. No manual math.
+            // Legacy `.mood` frame handling — accepted for backward
+            // compatibility with MMP v0.2.0 peers. The relevance gate
+            // below uses a *local* synthesis of (h1, h2) from the mood
+            // text and feeds them to the local CfC coupler purely as a
+            // similarity oracle; these synthesised vectors are never
+            // broadcast and never persisted. They are not the peer's
+            // actual hidden state — the peer's hidden state never
+            // crosses the wire under SVAF (Xu, 2026, §3.4).
+            //
+            // TODO(MMP v0.3.0): replace this local-synthesis relevance
+            // gate with a synthetic one-field CMB whose `.mood` field
+            // carries the received text + valence/arousal, and run it
+            // through the canonical SVAF Layer-4 evaluator on the same
+            // path as `.cmb` frames. The legacy `.mood` frame type
+            // should then be removed from the wire entirely.
             let (moodH1, moodH2) = ContextEncoder.encode(mood)
             let moodPeerId = "mood-\(nodeId)"
 

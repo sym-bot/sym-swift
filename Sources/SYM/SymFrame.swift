@@ -79,7 +79,14 @@ public struct E2EMetadata: Codable, Sendable {
 public enum SymFrameType: String, Codable, Sendable {
     /// Identity exchange on connection. See MMP v0.2.1 Section 5.
     case handshake = "handshake"
-    /// Cognitive state vector broadcast for coupling evaluation. See MMP v0.2.1 Section 5.
+    /// **DEPRECATED in MMP v0.2.2.** Legacy hidden-state broadcast from MMP v0.2.0.
+    /// CfC hidden states never cross the wire under SVAF
+    /// (Xu, 2026, *Symbolic-Vector Attention Fusion for Collective Intelligence*,
+    /// arXiv:2604.03955, §3.4). Use ``cmb`` instead — cognitive coupling is
+    /// performed at Layer 4 over CMBs by SVAF, not over raw hidden states at
+    /// Layer 5. Retained for one-way wire decoding only so v0.2.0 peers do
+    /// not break the parser; receivers MUST NOT feed the contents into the
+    /// local CfC. Senders MUST NOT emit this frame type.
     case stateSync = "state-sync"
     /// CMB memory share between peers. See MMP v0.2.1 Section 6.
     case cmb = "cmb"
@@ -132,12 +139,15 @@ public struct SymFrame: Codable, Sendable {
     /// Validator/anchor-origin CMBs enter at anchor weight 2.0 (Section 6.4).
     public var lifecycleRole: String?
 
-    // State sync
-    /// CfC hidden state vector 1 (state-sync). See MMP v0.2.0 Section 5.
+    // State sync — DEPRECATED, see ``SymFrameType/stateSync``.
+    /// CfC hidden state vector 1. **DEPRECATED in MMP v0.2.2.**
+    /// Hidden states never cross the wire under SVAF (Xu, 2026, §3.4).
+    /// Retained on the type for backward-compatible decoding only; senders
+    /// MUST NOT populate this field.
     public var h1: [Float]?
-    /// CfC hidden state vector 2 (state-sync). See MMP v0.2.0 Section 5.
+    /// CfC hidden state vector 2. **DEPRECATED in MMP v0.2.2.** See ``h1``.
     public var h2: [Float]?
-    /// Confidence score for the state vectors (0-1).
+    /// Confidence score for the (deprecated) state vectors (0-1).
     public var confidence: Float?
 
     // Memory share
@@ -258,6 +268,11 @@ public struct SymFrame: Codable, Sendable {
         return frame
     }
 
+    /// **DEPRECATED in MMP v0.2.2.** Hidden states never cross the wire under
+    /// SVAF (Xu, 2026, §3.4). Construct CMBs via ``SymNode/remember(fields:tags:parents:originTimestamp:)``
+    /// and let the node broadcast them on the ``cmb`` channel; cognitive
+    /// coupling is performed at Layer 4 over CMBs, not over hidden states.
+    @available(*, deprecated, message: "MMP v0.2.2: hidden states do not cross the wire. Use SymNode.remember() to broadcast CMBs.")
     static func stateSync(h1: [Float], h2: [Float], confidence: Float) -> SymFrame {
         var frame = SymFrame(type: .stateSync)
         frame.h1 = h1

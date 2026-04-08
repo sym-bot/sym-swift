@@ -2,6 +2,46 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.60
+
+### Changed (MMP v0.2.2 spec conformance)
+
+- **`state-sync` frame is now deprecated.** CfC hidden states never cross
+  the wire under SVAF (Xu, 2026, *Symbolic-Vector Attention Fusion for
+  Collective Intelligence*, [arXiv:2604.03955](https://arxiv.org/abs/2604.03955),
+  §3.4). Cognitive coupling propagates as **CMBs** at SVAF Layer 4 only;
+  the per-agent CfC at Layer 6 stays private to each agent.
+- **`SymNode` no longer broadcasts `state-sync` frames.** Removed from
+  the Bonjour and relay handshake paths and from `broadcastCurrentState()`,
+  which is now a deprecated no-op. The `stateSyncInterval` constructor
+  parameter is preserved for source compatibility but no longer schedules
+  a timer.
+- **`SymNode` no longer feeds incoming `state-sync` frames into the local
+  CfC.** Frames received from older v0.2.0 / v0.2.1 peers are silently
+  dropped with an `[SYM] state-sync: dropping deprecated frame ...` log
+  line. Upgrade peers to MMP v0.2.2+ to silence the message.
+- **`SymEvent.stateSyncReceived` is deprecated and no longer fired.** The
+  case is preserved on the enum surface for source compatibility.
+  Subscribers should consume `.cmbAccepted`, `.memoryReceived`, or
+  `.moodDelivered` instead.
+- The deprecated factory `SymFrame.stateSync(h1:h2:confidence:)` and the
+  `h1` / `h2` / `confidence` fields on `SymFrame` are kept on the type
+  for backward-compatible decoding of inbound v0.2.0 frames; senders MUST
+  NOT populate them.
+
+SYMCore xcframework unchanged from 0.3.59 — this is a pure Swift wrapper
+change. No wire-format break for inbound parsing; outbound wire shrinks
+by one frame type per peer.
+
+### Migration
+
+If you previously relied on `.stateSyncReceived` to drive a coupling
+visualisation or downstream cognitive engine, switch to `.cmbAccepted`
+or `.memoryReceived` and read `(valence, arousal)` from the
+`cmb.fields[.mood]` field. The mood field is delivered across domain
+boundaries even when SVAF rejects the rest of the CMB
+(MMP §9.3 protocol guarantee R5).
+
 ## 0.3.59
 
 ### Fixed
