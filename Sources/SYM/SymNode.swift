@@ -1076,8 +1076,9 @@ public final class SymNode {
             // this CMB is a derivative of our own broadcast. Skip all
             // processing — including mood delivery — to prevent ping-pong
             // curation between same-app peers.
-            if let parents = incomingCMB.lineage?.parents, !parents.isEmpty {
-                let isEcho = parents.contains { store.hasLocalKey($0) }
+            if let parents = incomingCMB.lineage?.parents, !parents.isEmpty,
+               let localStore = store as? SymMemoryStore {
+                let isEcho = parents.contains { localStore.hasLocalKey($0) }
                 if isEcho {
                     logger.info("[SYM] cmb: echo detected — parent key found in local meshmem, skipping \(incomingCMB.key.prefix(20)) from \(peerName)")
                     break
