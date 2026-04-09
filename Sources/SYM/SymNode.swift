@@ -876,12 +876,8 @@ public final class SymNode {
             return true
         }
 
-        // Send handshake + wake channel. MMP v0.2.2: no state-sync — hidden
-        // states never cross the wire (SVAF, Xu 2026, §3.4). Cognitive
-        // bootstrap to a freshly-connected peer happens via the next CMB
-        // produced by `remember(fields:)`, evaluated by the peer's SVAF
-        // Layer 4 against its anchor memory.
-        session.send(.handshake(nodeId: identity.nodeId, name: name, publicKey: identity.publicKey, e2ePublicKey: e2ePublicKeyB64, lifecycleRole: "observer"))
+        // Handshake was already sent in sessionDidBecomeReady (on TCP connect).
+        // Send wake channel now that the peer is registered.
         if let wc = wakeChannel {
             session.send(.wakeChannel(platform: wc.platform, token: wc.token, environment: wc.environment))
         }
@@ -1402,6 +1398,19 @@ extension SymNode: SymPeerSessionDelegate {
         }
 
         addPeer(session, nodeId: nodeId, peerName: name, isOutbound: session.isOutbound)
+    }
+
+    func sessionDidBecomeReady(_ session: SymPeerSession) {
+        // Send handshake immediately when TCP connection is established.
+        // Both sides send before either receives, breaking the deadlock
+        // where each waits for the other's handshake frame.
+        session.send(.handshake(
+            nodeId: identity.nodeId,
+            name: name,
+            publicKey: identity.publicKey,
+            e2ePublicKey: e2ePublicKeyB64,
+            lifecycleRole: "observer"
+        ))
     }
 
     func session(_ session: SymPeerSession, didReceive frame: SymFrame) {

@@ -24,6 +24,9 @@ protocol SymPeerSessionDelegate: AnyObject {
 
     /// The session disconnected.
     func session(_ session: SymPeerSession, didDisconnectWith reason: String)
+
+    /// TCP connection is ready — delegate should send handshake.
+    func sessionDidBecomeReady(_ session: SymPeerSession)
 }
 
 // MARK: - Peer Session
@@ -233,7 +236,10 @@ final class SymPeerSession {
         case .ready:
             logger.info("[SYM] session: connection ready (outbound=\(self.isOutbound))")
             startReceiving()
-            // Handshake is sent by SymNode after peer registration (with publicKey + e2ePublicKey)
+            // Notify delegate to send handshake immediately — both sides must
+            // send before either can complete, avoiding the deadlock where each
+            // waits for the other's handshake frame first.
+            delegate?.sessionDidBecomeReady(self)
 
         case .failed(let error):
             logger.error("[SYM] session: connection failed: \(error.localizedDescription)")
