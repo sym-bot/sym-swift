@@ -269,15 +269,17 @@ final class SymPeerSession {
         heartbeatTask?.cancel()
         heartbeatTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 5_000_000_000) // 5s
+                try? await Task.sleep(nanoseconds: 10_000_000_000) // 10s check interval (matches Node.js)
                 guard !Task.isCancelled, let self else { break }
 
                 let elapsed = Date().timeIntervalSince(self.lastSeen)
-                if elapsed > 15 {
+                if elapsed > 120 {
+                    // 120s timeout matches Node.js SYM — tolerates wifi blips,
+                    // iCloud sync pauses, and iOS backgrounding without false disconnects.
                     self.logger.warning("[SYM] session: heartbeat timeout for \(self.peerName ?? "unknown")")
                     self.disconnect()
                     break
-                } else if elapsed > 5 {
+                } else if elapsed > 10 {
                     self.send(.ping())
                 }
             }
