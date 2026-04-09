@@ -2,6 +2,41 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.74
+
+### Fixed
+
+- **Echo loop prevention (MMP Section 14).** When node A broadcasts a CMB
+  and node B remixes it back, node A now detects the echo by checking the
+  incoming CMB's lineage parents against its own local meshmem keys. If any
+  parent key exists locally, the CMB is a derivative of A's own broadcast —
+  all processing is skipped, including mood delivery. This prevents
+  ping-pong curation between same-app peers (e.g. two MeloTune instances
+  where Mac→iPhone→Mac caused an 8-second genre revert loop).
+
+### Added
+
+- `SymMemoryStore.hasLocalKey(_:)` — checks if a CMB key exists in the
+  node's local meshmem directory (persisted, survives restart).
+
+## 0.3.73
+
+### Fixed
+
+- **Heartbeat timeout increased to 120s** (from 15s) to match Node.js SYM.
+  The aggressive 15s timeout caused false peer disconnects during wifi
+  blips, iCloud sync pauses, and iOS backgrounding. Check interval raised
+  to 10s, ping threshold to 10s.
+
+## 0.3.72
+
+### Fixed
+
+- Preserve `valence`/`arousal` structured floats on SVAF-fused CMB mood
+  fields (MMP §8.2). Previously the fusion path dropped the numeric
+  coordinates, causing downstream mood inference to fall back to keyword
+  extraction instead of using the peer's actual circumplex values.
+
 ## 0.3.60
 
 ### Changed (MMP v0.2.2 spec conformance)
