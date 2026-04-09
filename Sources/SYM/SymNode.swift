@@ -1131,7 +1131,13 @@ public final class SymNode {
                 // Synthesize field text
                 // TODO: v2 — LLM synthesis of field text
                 let fusedText = incomingField.text
-                fusedFields[field] = CMBFieldVector(text: fusedText, vector: fused)
+                // MMP §8.2: preserve mood field's valence/arousal structured floats
+                fusedFields[field] = CMBFieldVector(
+                    text: fusedText,
+                    vector: fused,
+                    valence: incomingField.valence,
+                    arousal: incomingField.arousal
+                )
             }
 
             // 4. Aggregate drift: weighted average of per-field drifts
