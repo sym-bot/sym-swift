@@ -36,7 +36,7 @@ protocol SymDiscoveryDelegate: AnyObject {
 /// TXT record carries: node-id, node-name, hostname.
 final class SymDiscovery {
 
-    static let defaultServiceType = "_sym._tcp"
+    public static let defaultServiceType = "_sym._tcp"
 
     let serviceType: String
     private let identity: SymIdentity
