@@ -395,7 +395,7 @@ public final class SymNode {
         relay: URL? = nil,
         relayToken: String? = nil,
         relayOnly: Bool = false,
-        discoveryServiceType: String = SymDiscovery.defaultServiceType
+        discoveryServiceType: String = "_sym._tcp"
     ) {
         self.name = name
         self.cognitiveProfile = cognitiveProfile
