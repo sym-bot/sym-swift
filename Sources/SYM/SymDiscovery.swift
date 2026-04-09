@@ -136,20 +136,20 @@ final class SymDiscovery {
 
     private func startBrowser() {
         let descriptor = NWBrowser.Descriptor.bonjourWithTXTRecord(
-            type: Self.serviceType,
+            type: serviceType,
             domain: nil
         )
         let parameters = NWParameters()
         parameters.includePeerToPeer = true
         let browser = NWBrowser(for: descriptor, using: parameters)
 
-        browser.stateUpdateHandler = { [weak self] state in
+        browser.stateUpdateHandler = { [weak self] (state: NWBrowser.State) in
             if case .ready = state {
                 self?.logger.info("[SYM] discovery: browser active, scanning for peers")
             }
         }
 
-        browser.browseResultsChangedHandler = { [weak self] _, changes in
+        browser.browseResultsChangedHandler = { [weak self] (_: Set<NWBrowser.Result>, changes: Set<NWBrowser.Result.Change>) in
             self?.handleBrowseChanges(changes)
         }
 
