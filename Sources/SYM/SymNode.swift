@@ -1071,6 +1071,19 @@ public final class SymNode {
             let moodText = incomingCMB.fields[.mood]?.text ?? "none"
             logger.info("[SYM] cmb: received CMB \(incomingCMB.key.prefix(20)) from \(peerName) (\(fieldCount) fields, mood: \(moodText))")
 
+            // Echo loop prevention (MMP Section 14): if the incoming CMB's
+            // lineage parents include a key that exists in our local meshmem,
+            // this CMB is a derivative of our own broadcast. Skip all
+            // processing — including mood delivery — to prevent ping-pong
+            // curation between same-app peers.
+            if let parents = incomingCMB.lineage?.parents, !parents.isEmpty {
+                let isEcho = parents.contains { store.hasLocalKey($0) }
+                if isEcho {
+                    logger.info("[SYM] cmb: echo detected — parent key found in local meshmem, skipping \(incomingCMB.key.prefix(20)) from \(peerName)")
+                    break
+                }
+            }
+
             // ── SVAF v2: Per-Field CMB Fusion ──────────────────────
             // MMP v0.2.0 Section 9: λ_j = α_f · cos(x_new, x_j) · g(l_j) · exp(-λ(t_now - t_j)) · c_j
             // Per-field drift evaluation + field-wise weighted fusion → NEW synthesized memory

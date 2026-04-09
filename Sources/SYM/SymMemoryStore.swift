@@ -101,6 +101,24 @@ final class SymMemoryStore: CMBStore, @unchecked Sendable {
         }
     }
 
+    /// Check if a CMB key exists in local meshmem (produced by this node).
+    func hasLocalKey(_ key: String) -> Bool {
+        ioQueue.sync {
+            let localDir = memoriesDir.appendingPathComponent("local")
+            guard fileManager.fileExists(atPath: localDir.path) else { return false }
+            let files = (try? fileManager.contentsOfDirectory(at: localDir, includingPropertiesForKeys: nil))?
+                .filter { $0.pathExtension == "json" } ?? []
+            for file in files {
+                if let data = try? Data(contentsOf: file),
+                   let entry = try? JSONDecoder().decode(SymMemoryEntry.self, from: data),
+                   entry.key == key {
+                    return true
+                }
+            }
+            return false
+        }
+    }
+
     // MARK: - Search
 
     /// Search all memories (local + peer) by keyword.
