@@ -375,6 +375,11 @@ public final class SymNode {
     ///   - relay: WebSocket relay URL for internet-scale mesh (e.g. `wss://sym-relay.onrender.com`).
     ///   - relayToken: Shared secret for relay authentication.
     ///   - relayOnly: If true, skip Bonjour discovery and only use the relay.
+    ///   - discoveryServiceType: Bonjour service type for LAN discovery.
+    ///     Defaults to `_sym._tcp` (interoperable with Node.js SYM nodes).
+    ///     Apps that want isolated LAN meshes should use a custom type
+    ///     (e.g. `_melotune._tcp`). Peers on different service types never
+    ///     see each other on LAN.
     public init(
         name: String,
         cognitiveProfile: String? = nil,
@@ -389,7 +394,8 @@ public final class SymNode {
         stateSyncInterval: TimeInterval = 0,
         relay: URL? = nil,
         relayToken: String? = nil,
-        relayOnly: Bool = false
+        relayOnly: Bool = false,
+        discoveryServiceType: String = SymDiscovery.defaultServiceType
     ) {
         self.name = name
         self.cognitiveProfile = cognitiveProfile
@@ -417,7 +423,7 @@ public final class SymNode {
         let nodeDir = SymIdentityManager.nodeDirectory(for: name)
         self.store = store ?? SymMemoryStore(nodeDir: nodeDir, sourceName: name)
         self.meshNode = MeshNode(options: MeshNodeOptions(hiddenDim: ContextEncoder.dim))
-        self.discovery = SymDiscovery(identity: identity)
+        self.discovery = SymDiscovery(identity: identity, serviceType: discoveryServiceType)
 
         initLocalState()
     }

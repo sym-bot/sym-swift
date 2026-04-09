@@ -29,12 +29,16 @@ protocol SymDiscoveryDelegate: AnyObject {
 /// Handles Bonjour advertisement and browsing for SYM peers on the local network.
 /// See MMP v0.2.0 Section 5 (Connection, Layer 2).
 ///
-/// Service type: `_sym._tcp` — interoperable with Node.js SYM nodes.
+/// Service type: configurable per app. Defaults to `_sym._tcp` for
+/// interoperability with Node.js SYM nodes. Apps that want isolated
+/// LAN discovery (e.g. MeloTune using `_melotune._tcp`) pass a custom
+/// type at init. Peers on different service types never see each other.
 /// TXT record carries: node-id, node-name, hostname.
 final class SymDiscovery {
 
-    static let serviceType = "_sym._tcp"
+    static let defaultServiceType = "_sym._tcp"
 
+    let serviceType: String
     private let identity: SymIdentity
     private var listener: NWListener?
     private var browser: NWBrowser?
@@ -47,8 +51,9 @@ final class SymDiscovery {
 
     weak var delegate: SymDiscoveryDelegate?
 
-    init(identity: SymIdentity) {
+    init(identity: SymIdentity, serviceType: String = SymDiscovery.defaultServiceType) {
         self.identity = identity
+        self.serviceType = serviceType
     }
 
     deinit {
@@ -95,7 +100,7 @@ final class SymDiscovery {
 
             listener.service = NWListener.Service(
                 name: identity.nodeId,
-                type: Self.serviceType,
+                type: serviceType,
                 txtRecord: txtRecord
             )
 
