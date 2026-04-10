@@ -41,7 +41,7 @@ Each agent contributes its domain signal. The mesh connects them. Every agent ge
 
 - iOS 17+ / macOS 14+
 - Swift 5.9+
-- SYM source is open (Apache 2.0). SYMCore is distributed as a precompiled xcframework via SPM binary target — IP protected, no source access needed.
+- SYM source is open (Apache 2.0). SYMCore is distributed as a precompiled xcframework via SPM binary target. SYMCore contains the CfC neural engine (closed-form continuous-time networks for affective state modeling) and the SVAF evaluator (per-field attention fusion for incoming CMBs). Source is not included to protect trained model weights.
 
 ## Integration
 
@@ -268,7 +268,7 @@ node.on { event in
     case .message(let from, let content): ...
     case .xmeshInsight(let from, let trajectory, let patterns, let anomaly, let outcome, let coherence): ...
     case .couplingDecision(let peer, let decision, let drift): ...
-    case .stateSyncReceived(let from, let h1, let h2, let confidence): ...
+    case .stateSyncReceived(_, _, _, _): break // deprecated (MMP v0.2.2 — hidden states never cross the wire)
     }
 }
 ```
@@ -293,7 +293,16 @@ Your app's own logs should use a different prefix (e.g. `[Mesh]`, `[MyApp]`) to 
 
 ## Interoperability
 
-Same wire protocol as [SYM](https://github.com/sym-bot/sym) (Node.js). A Swift app and Claude Code discover each other on the same network and think together automatically.
+Same wire protocol as [SYM](https://github.com/sym-bot/sym) (Node.js). A Swift app and Claude Code discover each other on the same network and exchange CMBs automatically. Cross-platform mesh verified: iOS ↔ macOS Catalyst ↔ Windows ↔ Node.js (April 2026).
+
+Production-verified in [MeloTune](https://melotune.ai) (iOS, App Store since November 2025) — the first consumer app with SYM mesh cognition built in.
+
+## References
+
+- [MMP Specification v0.2.2](https://sym.bot/spec/mmp) — 8-layer protocol architecture
+- [SVAF Paper (arXiv:2604.03955)](https://arxiv.org/abs/2604.03955) — Symbolic-Vector Attention Fusion for Collective Intelligence
+- [Node.js SDK](https://github.com/sym-bot/sym) — reference implementation
+- [Claude Code Plugin](https://github.com/sym-bot/sym-mesh-channel) — real-time Claude-to-Claude mesh
 
 ## Contributing
 
