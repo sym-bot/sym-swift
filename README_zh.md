@@ -1,79 +1,113 @@
-# SYM Swift
+# SYM Swift — Mesh Memory Protocol (MMP) iOS/macOS 原生实现
 
-**让你的 iOS 或 macOS 应用加入 mesh，和网络上的所有 Agent 一起思考。**
+> **将你的 iOS / macOS 应用接入智能体网格，与局域网内所有 SYM 节点协同思考**
 
-你的应用看到运动数据。Claude Code 看到疲劳。MeloTune 看到跳过的播放列表。单独看都是噪声。在 mesh 上，它们成为集体智能——你的应用自主响应。
+[![Swift Package](https://img.shields.io/badge/Swift_Package-v0.3.66-orange)](https://github.com/sym-bot/sym-swift)
+[![Platform](https://img.shields.io/badge/Platform-iOS%2017+%20%7C%20macOS%2014+-blue)](https://developer.apple.com)
+[![MMP Spec](https://img.shields.io/badge/MMP-v0.2.2-blue)](https://sym.bot/spec/mmp)
+[![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
 
-SYM Swift 是 [Mesh Memory Protocol (MMP)](https://sym.bot/spec/mmp) 的原生 SDK。添加 package，接入一个 service 类，你的应用就能和 Claude Code 以及本地网络上的任何 SYM Agent 协作。无需服务器，无需 API，无需对接代码。
+---
 
-[![Swift](https://img.shields.io/badge/Swift_SPM-compatible-orange)](https://github.com/sym-bot/sym-swift)
-[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.2-purple)](https://sym.bot/spec/mmp)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![CI](https://github.com/sym-bot/sym-swift/actions/workflows/ci.yml/badge.svg)](https://github.com/sym-bot/sym-swift/actions/workflows/ci.yml)
-[![English](https://img.shields.io/badge/lang-English-blue)](README.md)
+## 核心价值
 
-## SYM 负责什么
+当前应用中的 AI 智能体普遍处于「孤岛状态」：健身应用看到用户完成训练，编码助手察觉用户疲劳，音乐应用发现用户跳过常听歌单——但没有任何单一应用能将「训练完成」+「提交频率下降」+「跳过歌单」关联为「用户可能疲劳，需要调整体验」。
 
-SYM 处理发现、连接和集体智能。你的应用自动发现本地网络上的其他 Agent——无需服务器、无需账号、无需配置。iOS 应用和 Claude Code 在同一网络上自动发现彼此，使用相同的协议一起思考。
+**SYM Swift 不是又一个 SDK，而是一套让自主智能体在保持上下文独立的前提下，通过结构化认知消息交换实现协同推理的底层协议原生实现。**
 
-开始之前，请阅读 [MMP 规范](https://sym.bot/spec/mmp) 了解协议——8 层架构、CMB 结构、[SVAF](https://sym.bot/research/svaf)（符号-向量注意力融合）逐字段评估，以及 Agent 如何在 mesh 上产生和消费信号。
+- 零配置局域网发现（Bonjour mDNS）
+- 与 Node.js 参考实现完全互操作
+- 原生 Swift API，符合 Apple 平台开发范式
+- 生产环境验证：MeloTune（App Store，2025 年 11 月起）
 
-你负责领域逻辑——你的 Agent 观察什么，以及如何响应 mesh 事件。参见 [如何提取 CAT7 字段](https://github.com/sym-bot/sym#how-agents-extract-cat7-fields)了解三种提取方式（LLM、结构化数据、提示模板）。
+> **重要澄清**：
+> - 智能体之间**不共享上下文**，仅通过离散认知消息块（CMB）交换信息
+> - 接收方收到的是**通道通知**，后续处理由应用逻辑或用户交互决定
+> - 所有认知内容必须使用 `cmb` 帧格式传输（MMP v0.2.2+）
 
-## 已在生产环境运行
+---
 
-[MeloTune](https://melotune.ai)——一个 AI 音乐 Agent——使用这个 SDK 加入 mesh，只需约 100 行 service 类。当 Claude Code 广播情绪（"长时间编码后疲劳"），MeloTune 通过局域网接收并自主策展匹配的播放列表。没有对接代码，没有 API。它们通过 Bonjour 发现彼此，使用 SYM 协议通信。
+## 设计原则
 
-同样的模式适用于任何领域——健身、专注、健康、生产力、智能家居。你的应用贡献只有它能看到的观察。Mesh 将所有 Agent 的信号综合为集体智能。
+| 原则 | 说明 |
+|------|------|
+| **智能体自治** | 每个应用维护完全独立的对话上下文与记忆存储（MMP §2.4），不共享状态 |
+| **离散消息交换** | 通过认知记忆块（CMB）传递结构化信息，非连续状态同步 |
+| **按字段评估** | SVAF 对每条消息的 7 个认知字段独立评估相关性，决定接收策略 |
+| **零配置发现** | 基于 DNS-SD (Bonjour) 的局域网自动发现，无需服务器或手动配置 |
+| **协议可组合** | 上层应用可基于 MMP 构建专属认知协议，底层传输与身份层保持正交 |
 
-## 构建你的领域 Agent
+---
 
-SYM 提供基础设施。你定义 Agent 的领域知识：
+## 技术架构：8 层协议栈（Swift 原生实现）
 
-- **健身应用**分享运动完成情况、心率、能量水平
-- **专注应用**分享深度工作时段、休息模式、注意力状态
-- **健康应用**分享压力指标、睡眠质量、活动水平
+```
+┌─────────────────────────────────┐
+│ Layer 7: 应用认知层              │ ← 你的业务逻辑（MeshService）
+├─────────────────────────────────┤
+│ Layer 6: CfC 神经动力学层        │ ← SYMCore 预编译组件（闭式连续时间神经网络）
+├─────────────────────────────────┤
+│ Layer 5: 合成记忆层              │ ← 跨智能体记忆融合策略
+├─────────────────────────────────┤
+│ Layer 4: SVAF 认知耦合层         │ ← 按字段相关性评估与注意力融合
+├─────────────────────────────────┤
+│ Layer 3: CMB 认知消息层          │ ← CAT7 七字段结构化消息格式
+├─────────────────────────────────┤
+│ Layer 2: 传输层 (TCP/WS)         │ ← 长度前缀 JSON 线格式
+├─────────────────────────────────┤
+│ Layer 1: 身份与加密层            │ ← 密钥对、签名、端到端加密
+├─────────────────────────────────┤
+│ Layer 0: 发现层 (DNS-SD/Bonjour) │ ← 零配置局域网发现
+└─────────────────────────────────┘
+```
 
-每个 Agent 贡献自己的领域信号。Mesh 连接它们。因为你的 Agent 加入，每个 Agent 都变得更智能。
+### SYMCore 组件说明
 
-## 要求
+| 组件 | 功能 | 分发形式 |
+|------|------|----------|
+| **SYM** | 协议栈主框架（发现、连接、事件循环、CMB 编码） | 开源源码（Apache 2.0） |
+| **SYMCore.xcframework** | CfC 神经引擎 + SVAF 评估器（含训练模型权重） | 预编译二进制（通过 SPM 分发） |
 
-- iOS 17+ / macOS 14+
+> SYMCore 包含经 237K 样本训练的神经网络权重，为保护知识产权采用二进制分发。接口完全开放，行为符合 MMP 规范，支持审计与调试。
+
+---
+
+## 快速集成
+
+### 前置要求
+- iOS 17+ / macOS 14+ / visionOS 1+
 - Swift 5.9+
-- SYM 源码开放（Apache 2.0）。SYMCore 以预编译 xcframework 形式通过 SPM 二进制目标分发。
+- Xcode 15+
+- 启用本地网络权限（见下方配置）
 
-## 集成步骤
+### 步骤 1：添加 Swift Package
 
-### 1. 添加 package
+**Xcode 图形界面**：
+1. `File → Add Package Dependencies`
+2. 输入 `https://github.com/sym-bot/sym-swift.git`
+3. 选择产品 **SYM** → 添加到你的 App Target
 
-在 Xcode 中：
-
-1. **File → Add Package Dependencies** → 输入 `https://github.com/sym-bot/sym-swift.git` → Add Package
-2. 选择产品时，选 **SYM** → 添加到你的 app target
-3. 在 target → **General → Frameworks, Libraries, and Embedded Content** → 确认 **SYM** 出现在列表中
-
-或在 Package.swift 中：
-
+**Package.swift**：
 ```swift
 dependencies: [
-    .package(url: "https://github.com/sym-bot/sym-swift.git", from: "0.3.2")
+    .package(url: "https://github.com/sym-bot/sym-swift.git", from: "0.3.66")
 ],
 targets: [
-    .target(name: "YourApp", dependencies: [
-        .product(name: "SYM", package: "sym-swift"),
-    ])
+    .target(
+        name: "YourApp",
+        dependencies: [
+            .product(name: "SYM", package: "sym-swift")
+        ]
+    )
 ]
 ```
 
-### 2. 添加网络权限
+### 步骤 2：配置网络权限
 
-SYM 通过 Bonjour 在本地网络上发现 peer。
-
-在 `Info.plist` 中添加：
-
+**Info.plist**：
 ```xml
 <key>NSLocalNetworkUsageDescription</key>
-<string>此应用使用本地网络连接 SYM mesh 上的其他 AI 智能体。</string>
+<string>本应用使用本地网络与其他 SYM 智能体协同思考，提供更个性化的体验。</string>
 
 <key>NSBonjourServices</key>
 <array>
@@ -81,8 +115,7 @@ SYM 通过 Bonjour 在本地网络上发现 peer。
 </array>
 ```
 
-在应用的 `.entitlements` 文件中添加：
-
+**Entitlements**（`.entitlements` 文件）：
 ```xml
 <key>com.apple.security.network.server</key>
 <true/>
@@ -90,11 +123,9 @@ SYM 通过 Bonjour 在本地网络上发现 peer。
 <true/>
 ```
 
-两者都必需——`network.server` 用于 Bonjour 广播（其他 Agent 发现你），`network.client` 用于连接 peer。
+> 两项均为必需：`server` 用于 Bonjour 广播（让其他节点发现你），`client` 用于主动连接对等节点。
 
-### 3. 创建 mesh service
-
-创建一个封装 `SymNode` 的 service 类。这是你应用的领域层——决定如何响应 mesh 事件。
+### 步骤 3：创建 Mesh 服务类
 
 ```swift
 import Foundation
@@ -103,38 +134,39 @@ import os.log
 
 @MainActor
 final class MeshService: ObservableObject {
-
+    
     static let shared = MeshService()
-
+    
     @Published private(set) var isRunning = false
     @Published private(set) var peerCount = 0
-
+    
     private var node: SymNode?
-    private let logger = Logger(subsystem: "com.example.myapp", category: "Mesh")
-
+    private let logger = Logger(subsystem: "com.example.app", category: "Mesh")
+    
     private init() {}
-
+    
     func start() {
         guard !isRunning else { return }
-
+        
         let symNode = SymNode(
-            name: "my-app",
-            cognitiveProfile: "跟踪运动、心率和能量水平的健身 Agent"
-            // 尽量具体——SYM 用这个来评估与其他 Agent 的相关性
+            name: "fitness-companion",
+            cognitiveProfile: "Fitness agent that tracks workouts, heart rate, and energy levels",
+            svafFieldWeights: FIELD_WEIGHT_PROFILES.fitness,
+            svafFreshnessSeconds: 10800
         )
         self.node = symNode
-
+        
         symNode.on { [weak self] event in
             Task { @MainActor in
                 self?.handleEvent(event)
             }
         }
-
+        
         symNode.start()
         isRunning = true
-        logger.info("[Mesh] started")
+        logger.info("[Mesh] started: \(symNode.nodeId)")
     }
-
+    
     func stop() {
         guard isRunning else { return }
         node?.stop()
@@ -143,48 +175,30 @@ final class MeshService: ObservableObject {
         peerCount = 0
         logger.info("[Mesh] stopped")
     }
-
-    // MARK: - 唤醒（iOS 后台）
-
+    
     func setWakeToken(platform: String, token: String, environment: String) {
         node?.setWakeToken(platform: platform, token: token, environment: environment)
     }
-
+    
     func reconnect() {
         node?.reconnect()
     }
-
-    // MARK: - 事件处理
-
+    
     private func handleEvent(_ event: SymEvent) {
         switch event {
-        case .moodDelivered(let from, let mood, _):
-            logger.info("[Mesh] mood from \(from): \(mood)")
-            // 你的领域逻辑——响应情绪
-
-        case .moodRejected:
-            break
-
-        case .message(let from, let content):
-            logger.info("[Mesh] message from \(from): \(content)")
-
-        case .memoryReceived(_, let content, _, let cmb):
-            logger.info("[Mesh] insight: \(content)")
-            // 你的领域逻辑——响应集体智能
-
+        case .moodDelivered(let from, let mood, let drift):
+            logger.info("[Mesh] mood from \(from): \(mood) (drift: \(drift, format: .number))")
+            
+        case .memoryReceived(_, let content, let decision, let cmb):
+            logger.info("[Mesh] insight received: \(content) (decision: \(decision))")
+            
         case .peerJoined(_, let name):
             peerCount = node?.peerList().count ?? 0
-            logger.info("[Mesh] peer joined: \(name)")
-
-        case .peerLeft(_, let name):
-            peerCount = node?.peerList().count ?? 0
-            logger.info("[Mesh] peer left: \(name)")
-
-        case .xmeshInsight(_, let trajectory, _, _, _, _):
-            guard trajectory.count >= 2 else { break }
-            // trajectory[0] = valence, trajectory[1] = arousal
-            // 你的领域逻辑——响应集体智能
-
+            logger.info("[Mesh] peer joined: \(name) (total: \(peerCount))")
+            
+        case .xmeshInsight(_, let trajectory, let patterns, _, _, _):
+            break
+            
         default:
             break
         }
@@ -192,19 +206,18 @@ final class MeshService: ObservableObject {
 }
 ```
 
-### 4. 在应用启动时启动
+### 步骤 4：应用启动时初始化
 
-**SwiftUI：**
-
+**SwiftUI**：
 ```swift
 import SwiftUI
 
 @main
-struct MyApp: App {
+struct YourApp: App {
     init() {
         MeshService.shared.start()
     }
-
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -213,76 +226,101 @@ struct MyApp: App {
 }
 ```
 
-**UIKit：**
+### 步骤 5：发布认知消息（可选）
 
 ```swift
-func application(_ application: UIApplication,
-                 didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-    MeshService.shared.start()
-    return true
-}
-```
-
-### 5. 没有第 5 步。
-
-你的应用已经在 mesh 上了。它通过 Bonjour 自动发现其他 Agent。Claude Code 或同一网络上的任何 SYM 节点都会找到它。
-
-## API
-
-```swift
-import SYM
-
-let node = SymNode(name: "my-app")
-
-// 生命周期
-node.start()
-node.stop()
-
-// 分享观察——Agent 从领域数据中提取 CAT7 字段
-node.remember(fields: [
-    .focus:      CMBEncoder.encodeField("运动完成"),
-    .commitment: CMBEncoder.encodeField("30分钟, 消耗320卡"),
-    .perspective: CMBEncoder.encodeField("健身 Agent, 运动后"),
-    .mood:       CMBEncoder.encodeField("充满活力", valence: 0.7, arousal: 0.6),
+node?.remember(fields: [
+    .focus:      CMBEncoder.encodeField("workout session completed"),
+    .issue:      CMBEncoder.encodeField("none"),
+    .intent:     CMBEncoder.encodeField("log progress and recover"),
+    .motivation: CMBEncoder.encodeField("maintain consistent training rhythm"),
+    .commitment: CMBEncoder.encodeField("30min, 320 cal burned"),
+    .perspective: CMBEncoder.encodeField("fitness agent, post-workout, morning"),
+    .mood:       CMBEncoder.encodeField("energized", valence: 0.7, arousal: 0.6)
 ])
-
-// 查询 mesh
-node.recall("能量模式")              // [SymMemoryEntry]
-node.peerList()                     // [SymPeerInfo]
-node.status()                       // SymNodeStatus
-
-// 后台唤醒（iOS）——在挂起时接收 mesh 信号
-node.setWakeToken(platform: "apns", token: deviceToken, environment: "production")
-node.reconnect()                    // 在静默推送处理器中调用
-
-// 事件——mesh 传递信号，你的应用决定如何响应
-node.on { event in
-    switch event {
-    case .peerJoined(let id, let name): ...
-    case .peerLeft(let id, let name): ...
-    case .moodDelivered(let from, let mood, let drift): ...
-    case .moodRejected(let from, let mood, let drift): ...
-    case .memoryReceived(let from, let content, let decision, let cmb): ...
-    case .message(let from, let content): ...
-    case .xmeshInsight(let from, let trajectory, let patterns, let anomaly, let outcome, let coherence): ...
-    case .couplingDecision(let peer, let decision, let drift): ...
-    case .stateSyncReceived(let from, let h1, let h2, let confidence): ...
-    }
-}
 ```
 
-## 互操作性
+> **字段提取策略**：
+> - 结构化数据应用（如健身追踪）：直接映射域数据到 CAT7 字段
+> - 非结构化文本应用：调用 LLM API 按 [MMP 提示模板](https://sym.bot/spec/mmp#cat7) 提取字段
+> - 混合应用：结合规则引擎与轻量 LLM
 
-和 [SYM](https://github.com/sym-bot/sym)（Node.js）使用相同的线路协议。Swift 应用和 Claude Code 在同一网络上自动发现彼此并一起思考。
+---
 
-## 贡献
+## 配置指南
 
-参见 [CONTRIBUTING.md](CONTRIBUTING.md)。所有更改必须符合 [MMP 规范](https://sym.bot/spec/mmp) 并通过 CI。
+### 认知画像预置模板
 
-欢迎中文社区的 PR 和 Issue。
+| 画像 | 适用场景 | 新鲜度窗口 | 设计理由 |
+|------|----------|------------|----------|
+| `music` | 音乐/氛围应用 | 1,800s (30min) | 情绪状态变化快，需快速响应 |
+| `coding` | 编码助手/开发工具 | 7,200s (2hr) | 会话上下文重要，昨日调试信息价值衰减 |
+| `fitness` | 健康/运动追踪 | 10,800s (3hr) | 久坐检测需累积数小时行为模式 |
+| `messaging` | 聊天/通知类应用 | 3,600s (1hr) | 近期对话上下文相关性最高 |
+| `knowledge` | 资讯/研究类应用 | 86,400s (24hr) | 按日周期更新，新闻时效性以天为单位 |
+| `uniform` | 通用原型/测试 | 1,800s (30min) | 无字段偏好，适合作为起点 |
+
+### 漂移阈值
+
+| 区域 | 漂移值 | 行为 | 置信度 |
+|------|--------|------|--------|
+| **对齐** | ≤ 0.25 | 接收并融合 | 完整 |
+| **审慎** | 0.25–0.50 | 接收但降权 | 衰减 |
+| **拒绝** | > 0.50 | 丢弃 | — |
+
+---
+
+## 典型应用场景
+
+### 健身应用 × 编码助手 × 音乐应用：疲劳感知协同
+
+| 应用 | 观测内容 | 网格合成洞察 |
+|------|----------|--------------|
+| **健身应用** | 「训练完成，心率 145，能量值 0.7」 | → 用户刚完成高强度训练 |
+| **Claude Code** | 「提交频率下降，消息变短，情绪值 -0.3」 | → 用户可能疲劳 |
+| **音乐应用** | 「跳过常听歌单 3 次」 | → 当前音乐不匹配用户状态 |
+
+→ **网格推理**：多信号能量衰减 → 非专注而是疲劳
+→ **自主响应**：音乐切换舒缓曲风，健身应用建议拉伸，编码助手提示休息
+
+---
+
+## 与 Claude Code 实时协作
+
+> 如需 **Claude 到 Claude 的实时推送**，请配合使用 [`@sym-bot/mesh-channel`](https://github.com/sym-bot/sym-mesh-channel)。
+
+Swift 应用与 Claude Code 可跨平台互操作（已验证：iOS ↔ macOS ↔ Windows ↔ Node.js）。
+
+---
+
+## 其他实现与生态
+
+| 语言 | 项目 | 维护者 | 范围 |
+|------|------|--------|------|
+| Swift | [sym-bot/sym-swift](https://github.com/sym-bot/sym-swift) | SYM.BOT | iOS/macOS 参考实现 |
+| Node.js | [sym-bot/sym](https://github.com/sym-bot/sym) | SYM.BOT | 参考实现 |
+| Rust | [AxonOS/axonos-consent](https://github.com/AxonOS-org/axonos-consent) | AxonOS | 零分配、Cortex-M4F |
+| Node.js (MCP) | [sym-bot/sym-mesh-channel](https://github.com/sym-bot/sym-mesh-channel) | SYM.BOT | Claude Code 插件 |
+
+---
+
+## 延伸阅读
+
+- [MMP 协议规范 (v0.2.2)](https://sym.bot/spec/mmp)
+- [SVAF 技术论文 (arXiv:2604.03955)](https://arxiv.org/abs/2604.03955)
+- [贡献指南](CONTRIBUTING.md)
+
+---
 
 ## 许可证
 
-Apache 2.0 — 参见 [LICENSE](LICENSE)
+- **参考实现代码**：[Apache License 2.0](LICENSE)
+- **SYMCore 二进制组件**：仅限与开源框架配套使用
 
-**[SYM.BOT Ltd](https://sym.bot)**
+> © 2026 SYM.BOT Ltd
+
+---
+
+> **集体智能不是让智能体变成同一个大脑，而是让每个自主大脑在保持独立的前提下，看见彼此眼中的世界。**
+
+*最后更新：2026 年 4 月 10 日 · 跨平台互操作验证：iOS ↔ macOS ↔ Windows ↔ Node.js*
