@@ -361,6 +361,54 @@ final class MemoryStoreTests: XCTestCase {
         let results = store.search(query: "tagged entry")
         XCTAssertGreaterThanOrEqual(results.count, 1)
     }
+
+    // MARK: - hasLocalKey (MMP §14 echo loop prevention)
+
+    func testHasLocalKeyReturnsTrueForStoredEntry() {
+        let entry = store.write(content: "echo test observation", tags: ["test"])
+        XCTAssertTrue(store.hasLocalKey(entry.key), "should find a key that was written locally")
+    }
+
+    func testHasLocalKeyReturnsFalseForUnknownKey() {
+        XCTAssertFalse(store.hasLocalKey("nonexistent-key-12345"), "should not find a key that was never written")
+    }
+
+    func testHasLocalKeyDoesNotMatchPeerEntries() {
+        let entry = CMBStoreEntry(
+            content: "peer observation",
+            source: "peer-agent",
+            tags: ["test"]
+        )
+        store.receiveFromPeer(peerId: "peer-node-id-1234", entry: entry)
+        XCTAssertFalse(store.hasLocalKey(entry.key), "should not match peer entries, only local")
+    }
+
+    // MARK: - Purge / Retention
+
+    func testPurgeRemovesExpiredEntries() {
+        store.write(content: "old entry for purge test")
+        // Small wait so the entry's storedAt is definitively in the past
+        Thread.sleep(forTimeInterval: 0.01)
+        // Purge with 0s retention — everything is expired
+        store.purge(retentionSeconds: 0)
+        let results = store.search(query: "old entry for purge test")
+        XCTAssertEqual(results.count, 0, "purge should remove expired entries")
+    }
+
+    func testPurgePreservesRecentEntries() {
+        store.write(content: "recent entry for purge test")
+        // Purge with 1 hour retention — nothing expired
+        store.purge(retentionSeconds: 3600)
+        let results = store.search(query: "recent entry for purge test")
+        XCTAssertGreaterThanOrEqual(results.count, 1, "purge should preserve recent entries")
+    }
+
+    func testRecentCMBsReturnsEntries() {
+        store.write(content: "cmb test entry one")
+        store.write(content: "cmb test entry two")
+        let cmbs = store.recentCMBs(limit: 5)
+        XCTAssertGreaterThanOrEqual(cmbs.count, 2, "should return CMBs for stored entries")
+    }
 }
 
 // MARK: - Node Tests

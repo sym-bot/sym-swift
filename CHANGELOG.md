@@ -2,6 +2,25 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.76
+
+### Fixed
+
+- **Bonjour auto-reconnect after peer disconnect.** When a peer's TCP
+  connection drops (iOS backgrounding, wifi blip) but the mDNS record
+  remains visible, the node now re-scans current browse results after 5s
+  to attempt reconnection. Previously the peer was permanently lost until
+  the SYM node was restarted, because `NWBrowser` doesn't re-fire
+  `.added` events for services that never disappeared from mDNS.
+
+- `SymDiscovery.retryVisiblePeers()` — re-evaluates current Bonjour
+  browse results, called automatically after any peer disconnect.
+
+### Tests
+
+- 59 tests, 0 failures. Added 6 new tests: `hasLocalKey` echo loop
+  detection (3 tests), purge/retention (2 tests), `recentCMBs` (1 test).
+
 ## 0.3.74
 
 ### Fixed

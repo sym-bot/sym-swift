@@ -993,6 +993,13 @@ public final class SymNode {
             emit(.peerLeft(nodeId: nodeId, name: peer.name))
             emit(.metric(type: "peer-left", detail: ["name": peer.name]))
         }
+
+        // Auto-reconnect: after a peer drops, re-scan Bonjour browse results
+        // in case the mDNS record is still visible (common with iOS backgrounding
+        // or transient TCP resets). 5s delay lets network state settle.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            self?.discovery.retryVisiblePeers()
+        }
     }
 
     private func handlePeerFrame(nodeId: String, peerName: String, frame: SymFrame) {

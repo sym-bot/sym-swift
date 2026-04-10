@@ -157,6 +157,21 @@ final class SymDiscovery {
         self.browser = browser
     }
 
+    /// Re-scan current Bonjour browse results to reconnect peers whose TCP
+    /// connection dropped but whose mDNS record is still visible. Called
+    /// after peer disconnect with a delay to allow network state to settle.
+    func retryVisiblePeers() {
+        queue.async { [weak self] in
+            guard let self, let browser = self.browser else { return }
+            let results = browser.browseResults
+            guard !results.isEmpty else { return }
+            self.logger.info("[SYM] discovery: retrying \(results.count) visible peer(s)")
+            for result in results {
+                self.handlePeerFound(result)
+            }
+        }
+    }
+
     private func handleBrowseChanges(_ changes: Set<NWBrowser.Result.Change>) {
         for change in changes {
             switch change {
