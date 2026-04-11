@@ -2,6 +2,82 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.77
+
+### Added
+
+- **SVAF fourth outcome — semantic redundancy pre-filter** (paper §4.5).
+  `SymNode` now classifies an incoming CMB as *redundant* when every
+  CAT7 field's vector has cosine similarity greater than
+  `(1 − svafRedundancyThreshold)` with at least one existing anchor
+  field's vector. The filter runs **before** the SVAFFusion drift
+  classifier, because SVAF's fusion-based drift formula
+  (`drift = 1 − cosSim(fused, incoming)`) collapses identical and
+  orthogonal inputs to the same near-zero drift value — redundancy
+  cannot be detected from drift output alone and requires a
+  similarity-based check at the receive-handler pre-step.
+
+- `SymNode.init` gains two new parameters:
+  - `svafRedundancyThreshold: Float = 0.02` — per-instance, default
+    is conservative (≥ 98% per-field similarity required to classify
+    as redundant). Tune per agent based on the observed near-duplicate
+    distribution in the production workload. Matches the per-instance
+    pattern already established for `svafStableThreshold` and
+    `svafGuardedThreshold`.
+  - `svafRedundancyCheckEnabled: Bool = false` — feature flag, default
+    **off** for backward compatibility. Existing SDK consumers who
+    bump to this version see identical behaviour. Agents that want
+    the fourth outcome opt in explicitly at init.
+
+- `SymNode.isCMBRedundant(incoming:anchors:)` — internal helper method
+  for the pre-filter logic. Exposed as `internal` rather than `private`
+  so the dedicated test suite (`SVAFRedundancyTests`) can exercise it
+  in isolation without spinning up a live peer session.
+
+### Absorbed-anchor storage pattern
+
+- Redundant CMBs are stored with a `sym.absorbed` tag rather than
+  dropped entirely. This preserves the CMB key in local meshmem so
+  future descendants (CMBs with this one as a lineage parent) are
+  still caught by the existing lineage-based echo filter
+  (`hasLocalKey`). The fusion pipeline filters absorbed entries out
+  of the anchor set so they don't contaminate future fusion math.
+  No schema change — uses the existing `tags: [String]` field on
+  `CMBStoreEntry`.
+
+- When `svafRedundancyCheckEnabled` is true, the anchor fetch path
+  switches from `recentCMBs(limit: 5)` to a tag-filtered query over
+  `allEntries()`. When the flag is off, the fast path is unchanged.
+
+### Event semantics
+
+- Redundant CMBs emit `.metric(type: "cmb-redundant", ...)` but do
+  **not** emit `.cmbAccepted` or `.memoryReceived`. R5 mood
+  passthrough does not fire on redundant CMBs — a redundant mood
+  signal is by definition the same mood the receiver already has,
+  so delivering it would be duplicate work and could trigger
+  spurious re-curation.
+
+### Tests
+
+- 68 tests, 0 failures (59 pre-existing + 9 new).
+  `SVAFRedundancyTests` covers:
+  - Feature flag OFF by default and when explicitly disabled
+  - Identical vectors → redundant
+  - Orthogonal vectors → NOT redundant (critical — this is the
+    case that distinguishes the pre-filter from the drift classifier)
+  - Small perturbation at default 0.02 threshold → redundant
+  - Tight threshold (0.0001) → small perturbation escapes classification
+  - Single novel field blocks redundancy (AND-over-all-fields semantics)
+  - Empty anchor set → always returns false
+  - Multi-anchor set: redundancy fires if ANY anchor covers the incoming
+
+### Paper alignment
+
+- Paper §4.5 claim "four outcomes (redundant, aligned, guarded,
+  rejected)" is now backed by shipping code. The CAPABILITY exists in
+  the SDK; activation is per-agent via `svafRedundancyCheckEnabled`.
+
 ## 0.3.76
 
 ### Fixed

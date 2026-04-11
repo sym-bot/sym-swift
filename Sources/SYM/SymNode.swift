@@ -235,6 +235,12 @@ public final class SymNode {
     private let svafTemporalLambda: Float       // Weight of temporal drift in combined score (default 0.3)
     private let svafFreshnessSeconds: Float     // τ_freshness for temporal decay (default 1800 = 30min)
     private let svafFieldWeights: CMBFieldWeights  // Per-field α_f weights
+    // SVAF fourth outcome: semantic redundancy (paper §4.5). Fires BEFORE
+    // the fusion classifier because SVAF's fusion-based drift formula
+    // collapses identical and orthogonal inputs to the same drift value,
+    // so redundancy has to be detected via similarity, not drift.
+    private let svafRedundancyThreshold: Float   // Redundant if max per-field cosSim > (1 − this) across all fields
+    private let svafRedundancyCheckEnabled: Bool // Feature flag — default off for backward compat
     private let retentionSeconds: TimeInterval    // How long to keep CMBs in local storage (default 86400 = 24h)
     private var purgeTimer: Timer?
 
@@ -362,6 +368,21 @@ public final class SymNode {
     ///   - svafTemporalLambda: Weight of temporal drift in combined score (default 0.3).
     ///   - svafFreshnessSeconds: τ for temporal decay — signals older than this are stale (default 1800 = 30min).
     ///   - svafFieldWeights: Per-field α_f weights for SVAF evaluation (default: uniform).
+    ///   - svafRedundancyThreshold: Paper §4.5 fourth outcome. An incoming CMB is
+    ///     classified as *redundant* when every CAT7 field's vector has cosine
+    ///     similarity greater than `(1 − svafRedundancyThreshold)` with at least
+    ///     one existing anchor field's vector. Default `0.02` — conservative, meaning
+    ///     inputs must be ≥ 98% similar on every field to be considered redundant.
+    ///     Tune per agent based on the observed distribution of near-duplicates in
+    ///     the production workload. Has no effect unless
+    ///     `svafRedundancyCheckEnabled` is `true`.
+    ///   - svafRedundancyCheckEnabled: Feature flag gating the redundancy pre-filter
+    ///     described above. Default `false` for backward compatibility — existing
+    ///     consumers upgrading the SDK version see identical behaviour. Agents that
+    ///     want the fourth SVAF outcome enable it explicitly at init (e.g. MeloTune
+    ///     in `SymMeshService`). When disabled, the receive handler behaves exactly
+    ///     as prior SDK versions: the three-outcome classifier (aligned / guarded /
+    ///     rejected) plus R5 mood passthrough.
     ///   - retentionSeconds: How long to keep CMBs in local storage (default 86400 = 24h).
     ///     Regulated domains MUST set this per compliance requirements:
     ///     legal (per jurisdiction), health (HIPAA 6yr), finance (MiFID II 5yr, SEC 7yr).
@@ -389,6 +410,8 @@ public final class SymNode {
         svafTemporalLambda: Float = 0.3,
         svafFreshnessSeconds: Float = 1800,
         svafFieldWeights: CMBFieldWeights = .uniform,
+        svafRedundancyThreshold: Float = 0.02,
+        svafRedundancyCheckEnabled: Bool = false,
         retentionSeconds: TimeInterval = 86400,
         store: (any CMBStore)? = nil,
         stateSyncInterval: TimeInterval = 0,
@@ -405,6 +428,8 @@ public final class SymNode {
         self.svafTemporalLambda = svafTemporalLambda
         self.svafFreshnessSeconds = svafFreshnessSeconds
         self.svafFieldWeights = svafFieldWeights
+        self.svafRedundancyThreshold = svafRedundancyThreshold
+        self.svafRedundancyCheckEnabled = svafRedundancyCheckEnabled
         self.retentionSeconds = retentionSeconds
         self.stateSyncInterval = stateSyncInterval
         self.relayURL = relay
@@ -426,6 +451,63 @@ public final class SymNode {
         self.discovery = SymDiscovery(identity: identity, serviceType: discoveryServiceType)
 
         initLocalState()
+    }
+
+    // MARK: - SVAF Redundancy Pre-Filter (Paper §4.5 fourth outcome)
+
+    /// Tag applied to memory entries that were absorbed by the
+    /// redundancy pre-filter. Kept as a type constant so tests and
+    /// future store-level filters can reference the same string.
+    internal static let absorbedTag = "sym.absorbed"
+
+    /// Classify an incoming CMB as redundant relative to a set of
+    /// anchors. Returns `true` when every CAT7 field's vector has
+    /// cosine similarity greater than `(1 − svafRedundancyThreshold)`
+    /// with at least one anchor field's vector. In other words, the
+    /// incoming adds no new information to any of the seven semantic
+    /// dimensions the receiver tracks.
+    ///
+    /// Runs only when `svafRedundancyCheckEnabled` is true. When the
+    /// flag is off, the method always returns `false` — preserving
+    /// backward compatibility with SDK consumers who have not opted
+    /// in to the fourth outcome.
+    ///
+    /// Design notes:
+    ///   - The check is AND over all fields, not OR. A single novel
+    ///     field saves the CMB from the redundancy classification —
+    ///     this protects against losing a CMB that shares six out of
+    ///     seven fields with an existing anchor but carries a
+    ///     genuinely new signal in the seventh.
+    ///   - The check succeeds as long as ANY anchor in the set
+    ///     covers the incoming. Unrelated anchors in the set must
+    ///     not block the classification.
+    ///   - Uses similarity (not SVAF's fusion-based drift) because
+    ///     the fusion formula collapses identical and orthogonal
+    ///     inputs to the same drift value. See
+    ///     SVAFFusionDriftSemanticsTests for the locked-in behaviour
+    ///     that motivates this design.
+    ///
+    /// Exposed as `internal` rather than `private` so the dedicated
+    /// test suite (SVAFRedundancyTests) can exercise it directly
+    /// without spinning up a live peer session. Production code
+    /// calls it from a single site in the receive handler.
+    internal func isCMBRedundant(
+        incoming: CognitiveMemoryBlock,
+        anchors: [CognitiveMemoryBlock]
+    ) -> Bool {
+        guard self.svafRedundancyCheckEnabled, !anchors.isEmpty else { return false }
+        let similarityFloor = 1.0 - self.svafRedundancyThreshold
+        for field in CMBField.allCases {
+            guard let incomingField = incoming.fields[field] else { continue }
+            let bestSim = anchors
+                .compactMap { $0.fields[field]?.vector }
+                .map { CMBEncoder.cosineSimilarity(incomingField.vector, $0) }
+                .max() ?? 0
+            if bestSim < similarityFloor {
+                return false  // this field is novel → not redundant overall
+            }
+        }
+        return true  // all populated fields are near-duplicates of some anchor
     }
 
     // MARK: - Context Encoding
@@ -1103,8 +1185,55 @@ public final class SymNode {
             let temporalDrift: Float = 1.0 - temporalDecay
             let confidence: Float = frame.confidence ?? 0.8
 
-            // 1. Get anchor CMBs from local memory
-            let anchors = store.recentCMBs(limit: 5)
+            // 1. Get anchor CMBs from local memory.
+            //    When the redundancy pre-filter is enabled, we exclude
+            //    entries tagged `sym.absorbed` so that previously-absorbed
+            //    redundant CMBs don't participate in fusion against future
+            //    incoming signals. Absorbed entries remain discoverable by
+            //    the lineage-based echo filter (via `hasLocalKey`) so they
+            //    still contribute to echo detection for their descendants.
+            let anchors: [CognitiveMemoryBlock]
+            if self.svafRedundancyCheckEnabled {
+                anchors = store.allEntries()
+                    .filter { !$0.tags.contains(Self.absorbedTag) }
+                    .sorted { $0.storedAt > $1.storedAt }
+                    .prefix(5)
+                    .compactMap { $0.cmb }
+            } else {
+                anchors = store.recentCMBs(limit: 5)
+            }
+
+            // 1a. Paper §4.5 fourth outcome — semantic redundancy pre-filter.
+            //     Runs BEFORE the fusion classifier because SVAF's fusion-
+            //     based drift formula (drift = 1 − cosSim(fused, incoming))
+            //     collapses identical and orthogonal inputs to the same
+            //     near-zero drift, so redundancy cannot be detected from
+            //     drift output. This similarity-based check fires only
+            //     when the feature flag is enabled.
+            if self.svafRedundancyCheckEnabled && isCMBRedundant(incoming: incomingCMB, anchors: anchors) {
+                // Store as "absorbed" — preserves the CMB key in local
+                // memory so future descendants are still caught by the
+                // lineage echo filter, but marks the entry so it does not
+                // participate in fusion. No cmbAccepted, no memoryReceived,
+                // no mood passthrough — redundant mood is by definition
+                // already delivered.
+                let absorbedContent = "[absorbed] " + String(CMBEncoder.renderContent(from: incomingCMB).prefix(80))
+                let absorbedEntry = SymMemoryEntry(
+                    key: frame.key ?? "absorbed-\(now)",
+                    content: absorbedContent,
+                    source: "\(self.name)+\(frame.source ?? peerName)",
+                    tags: [Self.absorbedTag],
+                    originTimestamp: originTs,
+                    storedAt: now,
+                    cmb: incomingCMB
+                )
+                store.receiveFromPeer(peerId: nodeId, entry: absorbedEntry)
+                _metrics.cmbAccepted += 1
+
+                logger.info("[SYM] memory: SVAF REDUNDANT from \(peerName) — absorbed with no fusion (threshold: \(self.svafRedundancyThreshold))")
+                emit(.metric(type: "cmb-redundant", detail: ["from": peerName, "key": absorbedEntry.key]))
+                break
+            }
 
             // 2. Per-field drift evaluation and fusion
             var fieldDrifts: [CMBField: Float] = [:]
