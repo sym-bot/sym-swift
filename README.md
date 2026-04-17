@@ -7,7 +7,7 @@ Your app sees workouts. Claude Code sees fatigue. MeloTune sees a skipped playli
 SYM Swift is the native SDK for the [Mesh Memory Protocol (MMP)](https://sym.bot/spec/mmp). Add the package, wire in a service class, and your app joins the mesh alongside Claude Code and any other SYM agent on the local network. No servers, no APIs, no integration code.
 
 [![Swift](https://img.shields.io/badge/Swift_SPM-compatible-orange)](https://github.com/sym-bot/sym-swift)
-[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.2-purple)](https://sym.bot/spec/mmp)
+[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.3-purple)](https://sym.bot/spec/mmp)
 [![arXiv](https://img.shields.io/badge/arXiv-2604.03955-b31b1b.svg)](https://arxiv.org/abs/2604.03955)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![CI](https://github.com/sym-bot/sym-swift/actions/workflows/ci.yml/badge.svg)](https://github.com/sym-bot/sym-swift/actions/workflows/ci.yml)
@@ -268,7 +268,7 @@ node.on { event in
     case .message(let from, let content): ...
     case .xmeshInsight(let from, let trajectory, let patterns, let anomaly, let outcome, let coherence): ...
     case .couplingDecision(let peer, let decision, let drift): ...
-    case .stateSyncReceived(_, _, _, _): break // deprecated (MMP v0.2.2 — hidden states never cross the wire)
+    case .stateSyncReceived(_, _, _, _): break // deprecated (MMP v0.2.3 — hidden states never cross the wire)
     }
 }
 ```
@@ -299,7 +299,7 @@ Production-verified in [MeloTune](https://melotune.ai) (iOS, App Store since Nov
 
 ## References
 
-- [MMP Specification v0.2.2](https://sym.bot/spec/mmp) — 8-layer protocol architecture
+- [MMP Specification v0.2.3](https://sym.bot/spec/mmp) — 8-layer protocol architecture
 - [SVAF Paper (arXiv:2604.03955)](https://arxiv.org/abs/2604.03955) — Symbolic-Vector Attention Fusion for Collective Intelligence
 - [Node.js SDK](https://github.com/sym-bot/sym) — reference implementation
 - [Claude Code Plugin](https://github.com/sym-bot/sym-mesh-channel) — real-time Claude-to-Claude mesh
