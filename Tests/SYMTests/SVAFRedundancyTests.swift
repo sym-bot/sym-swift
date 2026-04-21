@@ -28,7 +28,7 @@
 //  `case .cmb` flow and exercised indirectly via the live
 //  MultiTransportTests suite.
 //
-//  Copyright (c) 2026 SYM.BOT Ltd. Apache 2.0 License.
+//  Copyright (c) 2026 SYM.BOT. Apache 2.0 License.
 //
 
 import XCTest

@@ -5,7 +5,7 @@
 //  Bonjour/mDNS discovery for SYM mesh.
 //  Service type: _sym._tcp — same as Node.js SYM.
 //
-//  Copyright (c) 2026 SYM.BOT Ltd. Apache 2.0 License.
+//  Copyright (c) 2026 SYM.BOT. Apache 2.0 License.
 //
 
 import Foundation

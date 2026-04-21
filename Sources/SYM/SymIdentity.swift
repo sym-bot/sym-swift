@@ -5,7 +5,7 @@
 //  Node identity — persisted UUID v7, Ed25519 keypair, hostname, display name.
 //  Stored in ~/Library/Application Support/SYM/nodes/{name}/identity.json
 //
-//  Copyright (c) 2026 SYM.BOT Ltd. Apache 2.0 License.
+//  Copyright (c) 2026 SYM.BOT. Apache 2.0 License.
 //
 
 import CryptoKit

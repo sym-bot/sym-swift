@@ -317,7 +317,7 @@ Swift 应用与 Claude Code 可跨平台互操作（已验证：iOS ↔ macOS �
 - **参考实现代码**：[Apache License 2.0](LICENSE)
 - **SYMCore 二进制组件**：仅限与开源框架配套使用
 
-> © 2026 SYM.BOT Ltd
+> © 2026 SYM.BOT
 
 ---
 

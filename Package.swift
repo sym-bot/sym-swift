@@ -1,6 +1,6 @@
 // swift-tools-version: 5.9
 // SYM Swift — add your iOS/macOS app to the mesh
-// Copyright (c) 2026 SYM.BOT Ltd. Apache 2.0 License.
+// Copyright (c) 2026 SYM.BOT. Apache 2.0 License.
 
 import PackageDescription
 

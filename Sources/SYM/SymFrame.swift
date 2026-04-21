@@ -5,7 +5,7 @@
 //  Wire protocol — length-prefixed JSON frames.
 //  Compatible with Node.js SYM (lib/frame-parser.js).
 //
-//  Copyright (c) 2026 SYM.BOT Ltd. Apache 2.0 License.
+//  Copyright (c) 2026 SYM.BOT. Apache 2.0 License.
 //
 
 import Foundation

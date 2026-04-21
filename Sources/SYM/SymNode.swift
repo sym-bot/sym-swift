@@ -11,7 +11,7 @@
 //  Aligned peers share memories. Divergent peers stay independent.
 //  The intelligence is in the decision to share, not in the sharing itself.
 //
-//  Copyright (c) 2026 SYM.BOT Ltd. Apache 2.0 License.
+//  Copyright (c) 2026 SYM.BOT. Apache 2.0 License.
 //
 
 import CryptoKit

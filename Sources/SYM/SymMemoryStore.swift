@@ -5,7 +5,7 @@
 //  Per-node file-based memory store.
 //  Stores memories as JSON files under the node's data directory.
 //
-//  Copyright (c) 2026 SYM.BOT Ltd. Apache 2.0 License.
+//  Copyright (c) 2026 SYM.BOT. Apache 2.0 License.
 //
 
 import Foundation
