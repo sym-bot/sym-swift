@@ -2,7 +2,7 @@
 
 > **Add your iOS or macOS app to the mesh. Think together with every other agent on the network.**
 >
-> Native Swift SDK for the [Mesh Memory Protocol (MMP)](https://sym.bot/spec/mmp). Your app discovers other SYM agents over the local network, exchanges structured observations, and acts autonomously on collective intelligence. No servers, no accounts, no integration code between pairs of apps.
+> Native Swift SDK for the [Mesh Memory Protocol (MMP)](https://meshcognition.org/spec/mmp). Your app discovers other SYM agents over the local network, exchanges structured observations, and acts autonomously on collective intelligence. No servers, no accounts, no integration code between pairs of apps.
 
 ```swift
 // Package.swift
@@ -10,7 +10,7 @@
 ```
 
 [![Swift](https://img.shields.io/badge/Swift_SPM-compatible-orange)](https://github.com/sym-bot/sym-swift)
-[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.3-purple)](https://sym.bot/spec/mmp)
+[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v1.0-orange)](https://meshcognition.org/spec/mmp)
 [![SVAF arXiv](https://img.shields.io/badge/arXiv-2604.03955-b31b1b.svg)](https://arxiv.org/abs/2604.03955)
 [![MMP arXiv](https://img.shields.io/badge/arXiv-2604.19540-b31b1b.svg)](https://arxiv.org/abs/2604.19540)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
@@ -239,7 +239,7 @@ Your app is on the mesh. Other SYM peers on the same network discover it via Bon
 
 ## Background wake
 
-Most peer-to-peer SDKs die when iOS suspends the app. SYM survives via the [P2P wake protocol (MMP §5)](https://sym.bot/spec/mmp) — a peer can send an APNs silent push to your app, which wakes, reconnects the relay, and processes queued CMBs.
+Most peer-to-peer SDKs die when iOS suspends the app. SYM survives via the [P2P wake protocol (MMP §5)](https://meshcognition.org/spec/mmp) — a peer can send an APNs silent push to your app, which wakes, reconnects the relay, and processes queued CMBs.
 
 **Register on launch:**
 
@@ -376,7 +376,7 @@ Your app's own logs should use a different prefix (e.g. `[Mesh]`, `[MyApp]`) to 
 |---|---|---|---|---|
 | **Peer discovery** | Nearby only | Requires signalling server | Cloud-only | Bonjour LAN + optional relay |
 | **Backend needed?** | No | Signalling server | Vendor cloud | No (LAN) / self-host relay |
-| **Protocol openness** | Apple-only | Open | Vendor-specific | Open ([MMP](https://sym.bot/spec/mmp) + [arXiv](https://arxiv.org/abs/2604.19540)) |
+| **Protocol openness** | Apple-only | Open | Vendor-specific | Open ([MMP](https://meshcognition.org/spec/mmp) + [arXiv](https://arxiv.org/abs/2604.19540)) |
 | **Cross-platform peers** | Apple only | Via adapters | Any with SDK | Native Swift + Node.js + any MMP impl |
 | **Cognitive layer** | None (raw bytes) | None (raw streams) | None (raw events) | SVAF per-field relevance gate |
 | **Survives iOS background?** | No | No | Yes (push notifications) | Yes (P2P wake via APNs silent push) |
@@ -401,7 +401,7 @@ Same wire protocol as [SYM](https://github.com/sym-bot/sym) (Node.js) and [sym-m
 
 ## References
 
-- [MMP Specification v0.2.3](https://sym.bot/spec/mmp) — canonical web version of the 8-layer protocol
+- [MMP Specification v1.0](https://meshcognition.org/spec/mmp) — canonical web version of the 8-layer protocol
 - [MMP paper](https://arxiv.org/abs/2604.19540) — Xu, 2026. *Mesh Memory Protocol: Semantic Infrastructure for Multi-Agent LLM Systems*. arXiv:2604.19540.
 - [SVAF paper](https://arxiv.org/abs/2604.03955) — Xu, 2026. *Symbolic-Vector Attention Fusion for Collective Intelligence*. arXiv:2604.03955.
 - [sym (Node.js)](https://github.com/sym-bot/sym) — reference implementation.
@@ -409,7 +409,7 @@ Same wire protocol as [SYM](https://github.com/sym-bot/sym) (Node.js) and [sym-m
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). All changes must comply with the [MMP specification](https://sym.bot/spec/mmp) and pass CI before merge.
+See [CONTRIBUTING.md](CONTRIBUTING.md). All changes must comply with the [MMP specification](https://meshcognition.org/spec/mmp) and pass CI before merge.
 
 ## License
 

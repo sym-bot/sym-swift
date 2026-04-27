@@ -4,7 +4,7 @@
 
 [![Swift Package](https://img.shields.io/badge/Swift_Package-v0.3.66-orange)](https://github.com/sym-bot/sym-swift)
 [![Platform](https://img.shields.io/badge/Platform-iOS%2017+%20%7C%20macOS%2014+-blue)](https://developer.apple.com)
-[![MMP Spec](https://img.shields.io/badge/MMP-v0.2.3-blue)](https://sym.bot/spec/mmp)
+[![MMP Spec](https://img.shields.io/badge/MMP-v1.0-blue)](https://meshcognition.org/spec/mmp)
 [![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
 
 ---
@@ -23,7 +23,7 @@
 > **重要澄清**：
 > - 智能体之间**不共享上下文**，仅通过离散认知消息块（CMB）交换信息
 > - 接收方收到的是**通道通知**，后续处理由应用逻辑或用户交互决定
-> - 所有认知内容必须使用 `cmb` 帧格式传输（MMP v0.2.3+）
+> - 所有认知内容必须使用 `cmb` 帧格式传输（MMP v1.0+）
 
 ---
 
@@ -242,7 +242,7 @@ node?.remember(fields: [
 
 > **字段提取策略**：
 > - 结构化数据应用（如健身追踪）：直接映射域数据到 CAT7 字段
-> - 非结构化文本应用：调用 LLM API 按 [MMP 提示模板](https://sym.bot/spec/mmp#cat7) 提取字段
+> - 非结构化文本应用：调用 LLM API 按 [MMP 提示模板](https://meshcognition.org/spec/mmp#cat7) 提取字段
 > - 混合应用：结合规则引擎与轻量 LLM
 
 ---
@@ -306,7 +306,7 @@ Swift 应用与 Claude Code 可跨平台互操作（已验证：iOS ↔ macOS �
 
 ## 延伸阅读
 
-- [MMP 协议规范 (v0.2.3)](https://sym.bot/spec/mmp)
+- [MMP 协议规范 (v1.0)](https://meshcognition.org/spec/mmp)
 - [SVAF 技术论文 (arXiv:2604.03955)](https://arxiv.org/abs/2604.03955)
 - [贡献指南](CONTRIBUTING.md)
 
