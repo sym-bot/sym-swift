@@ -450,3 +450,87 @@ final class NodeTests: XCTestCase {
         XCTAssertEqual(a.nodeId, b.nodeId, "same name should produce same nodeId")
     }
 }
+
+// MARK: - Simultaneous-Dial Dedup Tests
+//
+// Both peers Bonjour-discover each other within ~50ms on a LAN and both
+// initiate outbound TCP. The handshakes complete on both sides, so each
+// node holds two sessions for the same nodeId (one outbound, one inbound).
+// `preferNewSessionInDualDial` is the tie-break that lets each peer
+// independently agree on which physical TCP connection survives, without
+// exchanging coordination frames.
+//
+// The critical correctness property: for the same (A, B) pair, peer A's
+// decision and peer B's decision must select the SAME physical
+// connection — A's outbound is also B's inbound, so if A picks "keep my
+// outbound," B must pick "keep my inbound" for that same socket pair.
+//
+// If both peers picked their own outbound, both would tear down the
+// same socket pair from opposite ends and the connection would die.
+// If both peers picked their own inbound, the symmetric problem occurs.
+
+final class SimultaneousDialDedupTests: XCTestCase {
+
+    /// Both peers MUST agree on the same physical connection. Models the
+    /// dual-dial scenario for an arbitrary (A, B) pair: A's outbound is
+    /// the same TCP socket as B's inbound.
+    func testBothPeersPickSamePhysicalConnection() {
+        let pairs: [(String, String)] = [
+            ("aaaa", "bbbb"),       // ascii lower
+            ("019dd87c", "019dd87d"), // realistic uuid7-prefix neighbors
+            ("zzzz", "aaaa"),       // reverse ordered
+            ("00000000-0000-7000-8000-000000000001",
+             "00000000-0000-7000-8000-000000000002"),  // full uuids
+        ]
+
+        for (a, b) in pairs {
+            // From A's perspective: A's outbound is the same socket as B's inbound.
+            let aPrefersOwnOutbound = SymNode.preferNewSessionInDualDial(
+                localNodeId: a, remoteNodeId: b, newIsOutbound: true
+            )
+            let aPrefersOwnInbound = SymNode.preferNewSessionInDualDial(
+                localNodeId: a, remoteNodeId: b, newIsOutbound: false
+            )
+            // From B's perspective: B's inbound is A's outbound; B's outbound is A's inbound.
+            let bPrefersOwnOutbound = SymNode.preferNewSessionInDualDial(
+                localNodeId: b, remoteNodeId: a, newIsOutbound: true
+            )
+            let bPrefersOwnInbound = SymNode.preferNewSessionInDualDial(
+                localNodeId: b, remoteNodeId: a, newIsOutbound: false
+            )
+
+            // Tie-break is total: each peer prefers exactly one direction.
+            XCTAssertNotEqual(aPrefersOwnOutbound, aPrefersOwnInbound,
+                              "A's outbound vs inbound preference must be opposite for pair (\(a), \(b))")
+            XCTAssertNotEqual(bPrefersOwnOutbound, bPrefersOwnInbound,
+                              "B's outbound vs inbound preference must be opposite for pair (\(a), \(b))")
+
+            // A's outbound socket = B's inbound socket. If A keeps its outbound,
+            // B must keep its inbound (same socket); otherwise both peers tear
+            // down the same socket pair from opposite ends.
+            XCTAssertEqual(aPrefersOwnOutbound, bPrefersOwnInbound,
+                           "A's outbound and B's inbound are the same socket — both peers must pick consistently for pair (\(a), \(b))")
+            XCTAssertEqual(aPrefersOwnInbound, bPrefersOwnOutbound,
+                           "A's inbound and B's outbound are the same socket — both peers must pick consistently for pair (\(a), \(b))")
+        }
+    }
+
+    /// The lower-nodeId-acts-as-client convention: the lower nodeId keeps
+    /// its outbound. Anchors the algorithm so future refactors don't
+    /// silently flip the convention (which would still be correct under
+    /// the symmetry test above, but would interop-break against any other
+    /// implementation that follows MMP convention).
+    func testLowerNodeIdKeepsOutbound() {
+        // a < b, so A is "client" and keeps its outbound.
+        let a = "00000000-0000-7000-8000-000000000001"
+        let b = "00000000-0000-7000-8000-000000000002"
+        XCTAssertTrue(SymNode.preferNewSessionInDualDial(localNodeId: a, remoteNodeId: b, newIsOutbound: true),
+                      "lower nodeId should keep its outbound")
+        XCTAssertFalse(SymNode.preferNewSessionInDualDial(localNodeId: a, remoteNodeId: b, newIsOutbound: false),
+                       "lower nodeId should reject its inbound")
+        XCTAssertFalse(SymNode.preferNewSessionInDualDial(localNodeId: b, remoteNodeId: a, newIsOutbound: true),
+                       "higher nodeId should reject its outbound")
+        XCTAssertTrue(SymNode.preferNewSessionInDualDial(localNodeId: b, remoteNodeId: a, newIsOutbound: false),
+                      "higher nodeId should keep its inbound")
+    }
+}

@@ -942,26 +942,113 @@ public final class SymNode {
 
     // MARK: - Multi-Transport Peer Management (MMP Section 4.6)
 
+    /// Deterministic tie-break for simultaneous-dial collisions. Both peers
+    /// observe the same `(localNodeId, remoteNodeId)` pair (with the local
+    /// and remote roles swapped on each side) and call this function with
+    /// their respective `newIsOutbound` value. The function picks the same
+    /// *physical* TCP connection on both sides — the outbound from the
+    /// lower nodeId, which is the inbound on the higher nodeId — so neither
+    /// peer needs to coordinate via a frame exchange.
+    ///
+    /// Returns `true` if the new session should replace the prior one,
+    /// `false` if the prior should be kept and the new session disconnected.
+    /// Internal-access for `@testable` unit tests.
+    static func preferNewSessionInDualDial(
+        localNodeId: String,
+        remoteNodeId: String,
+        newIsOutbound: Bool
+    ) -> Bool {
+        let localIsClient = localNodeId < remoteNodeId
+        let keepOutbound = localIsClient
+        return (keepOutbound == newIsOutbound)
+    }
+
+    /// Outcome of the addPeer state-machine. Threading note: the dict
+    /// mutation happens inside `peerQueue.sync`; the cleanup actions
+    /// (cancelling losers, sending frames, emitting events) happen after
+    /// the lock is released so we don't hold `peerQueue` across I/O.
+    private enum AddPeerOutcome {
+        case firstTime                                  // never seen before — new peer-joined
+        case secondaryTransport                         // existing peer, no prior bonjour
+        case replacedPriorBonjour(prev: SymPeerSession) // simultaneous dial: new wins
+        case rejectedNew                                // simultaneous dial: existing wins
+    }
+
     private func addPeer(_ session: SymPeerSession, nodeId: String, peerName: String, isOutbound: Bool) {
-        let isNew = peerQueue.sync { () -> Bool in
+        let outcome: AddPeerOutcome = peerQueue.sync {
             if var existing = self.peers[nodeId] {
-                // Section 4.6: add Bonjour as secondary transport
+                if let prev = existing.transports["bonjour"] ?? nil {
+                    // Simultaneous-dial collision: both peers Bonjour-discovered
+                    // each other within ~50ms and both initiated outbound TCP. Each
+                    // side now holds two handshaked sessions for the same nodeId
+                    // (one outbound, one inbound). Without explicit dedup the new
+                    // session silently overwrites the prior in the transports dict
+                    // — the orphan keeps a live NWConnection + read loop, eventually
+                    // fires didDisconnectWith, and `removeTransport` strips the
+                    // surviving winner from the dict. Net effect: every connection
+                    // dies within ~1–2s of handshake, application payloads never
+                    // cross the wire.
+                    //
+                    // Tie-break deterministically by nodeId so both peers agree on
+                    // the same physical connection without exchanging frames: the
+                    // lower nodeId acts as client and keeps its outbound; the
+                    // higher node keeps the matching inbound. The loser's delegate
+                    // is detached before disconnect (see fall-through below) so its
+                    // teardown can't ripple back through removeTransport.
+                    let preferNew = SymNode.preferNewSessionInDualDial(
+                        localNodeId: self.identity.nodeId,
+                        remoteNodeId: nodeId,
+                        newIsOutbound: isOutbound
+                    )
+                    if preferNew {
+                        existing.transports["bonjour"] = session
+                        existing.lastSeen = Date()
+                        self.peers[nodeId] = existing
+                        return .replacedPriorBonjour(prev: prev)
+                    }
+                    return .rejectedNew
+                }
+                // Section 4.6: add Bonjour as secondary transport on top of relay
                 existing.transports["bonjour"] = session
                 existing.lastSeen = Date()
                 self.peers[nodeId] = existing
-                return false
+                return .secondaryTransport
             }
             self.peers[nodeId] = PeerState(
                 transports: ["bonjour": session], name: peerName,
                 isOutbound: isOutbound, lastSeen: Date()
             )
-            return true
+            return .firstTime
+        }
+
+        switch outcome {
+        case .rejectedNew:
+            // Detach the delegate so this session's eventual cancellation does NOT
+            // fire didDisconnectWith → removeTransport, which would strip the
+            // still-registered winner from the transports dict.
+            logger.info("[SYM] peer: simultaneous-dial dedup — keeping prior, cancelling redundant \(isOutbound ? "outbound" : "inbound") to \(peerName)")
+            session.delegate = nil
+            session.disconnect()
+            return
+        case .replacedPriorBonjour(let prev):
+            logger.info("[SYM] peer: simultaneous-dial dedup — replacing prior with new \(isOutbound ? "outbound" : "inbound") to \(peerName)")
+            prev.delegate = nil
+            prev.disconnect()
+        case .secondaryTransport, .firstTime:
+            break
         }
 
         // Handshake was already sent in sessionDidBecomeReady (on TCP connect).
         // Send wake channel now that the peer is registered.
         if let wc = wakeChannel {
             session.send(.wakeChannel(platform: wc.platform, token: wc.token, environment: wc.environment))
+        }
+
+        let isNew: Bool
+        switch outcome {
+        case .firstTime:                                isNew = true
+        case .secondaryTransport, .replacedPriorBonjour: isNew = false
+        case .rejectedNew:                               return // unreachable, returned above
         }
 
         if isNew {
