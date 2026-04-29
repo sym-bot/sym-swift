@@ -974,6 +974,21 @@ public final class SymNode {
         case rejectedNew                                // simultaneous dial: existing wins
     }
 
+    /// Stale-prior detection threshold for dedup. If the existing peer entry
+    /// has not been touched within this many seconds, treat it as stale and
+    /// let the new connection replace it regardless of dedup tie-break.
+    /// Matches `@sym-bot/sym` v0.5.3 `_heartbeatInterval` default (10s) so
+    /// cross-runtime peers agree on the same staleness window.
+    ///
+    /// Without this, a peer process killed without graceful FIN (iOS app
+    /// suspension, Mac Catalyst rebuild, network drop) leaves the survivor
+    /// with a dead-but-ESTABLISHED TCP entry that the OS doesn't reap for
+    /// hours. The dedup logic then keeps rejecting the live new dial.
+    /// TCP keepalive (set in SymPeerSession.tcpParametersWithKeepalive)
+    /// reaps within ~4s, but until that fires the lastSeen-age check is
+    /// the application-level guard.
+    static let staleAfterSeconds: TimeInterval = 10
+
     private func addPeer(_ session: SymPeerSession, nodeId: String, peerName: String, isOutbound: Bool) {
         let outcome: AddPeerOutcome = peerQueue.sync {
             if var existing = self.peers[nodeId] {
@@ -998,20 +1013,33 @@ public final class SymNode {
                     //     disconnect the wire pair on the remote side and trigger
                     //     a peer-left storm. Always reject the duplicate.
                     //
+                    // BUT: both cases assume the prior is alive. A prior that
+                    // hasn't been touched within `staleAfterSeconds` is treated
+                    // as stale and replaced — the remote re-dialling is itself
+                    // strong evidence its prior is dead, and rejecting blocks
+                    // legitimate reconnects after a peer restart for hours
+                    // until OS keepalive reaps the zombie.
+                    //
                     // The losing session has its delegate detached before disconnect
                     // (see fall-through below) so its teardown can't ripple through
                     // removeTransport and clobber the surviving registered session.
-                    let isDualDial = prev.isOutbound != session.isOutbound
+                    let staleByLastSeen = Date().timeIntervalSince(existing.lastSeen) > Self.staleAfterSeconds
                     let preferNew: Bool
-                    if isDualDial {
-                        preferNew = SymNode.preferNewSessionInDualDial(
-                            localNodeId: self.identity.nodeId,
-                            remoteNodeId: nodeId,
-                            newIsOutbound: isOutbound
-                        )
+                    if staleByLastSeen {
+                        // Prior is stale — the new dial is the live one. Replace.
+                        preferNew = true
                     } else {
-                        // Same direction → keep the established prior, reject duplicate.
-                        preferNew = false
+                        let isDualDial = prev.isOutbound != session.isOutbound
+                        if isDualDial {
+                            preferNew = SymNode.preferNewSessionInDualDial(
+                                localNodeId: self.identity.nodeId,
+                                remoteNodeId: nodeId,
+                                newIsOutbound: isOutbound
+                            )
+                        } else {
+                            // Same direction → keep the established prior, reject duplicate.
+                            preferNew = false
+                        }
                     }
                     if preferNew {
                         existing.transports["bonjour"] = session

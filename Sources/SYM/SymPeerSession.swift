@@ -89,10 +89,34 @@ final class SymPeerSession {
 
     // MARK: - Init
 
+    /// TCP parameters with aggressive keepalive. Default macOS TCP keepalive
+    /// is `TCP_KEEPALIVE = 7200s` (2 hours) before the first probe, which
+    /// means a dead-but-ESTABLISHED socket (peer process killed without
+    /// graceful FIN — common on iOS app suspension and Mac Catalyst rebuilds)
+    /// stays in ESTABLISHED state on the survivor side for hours. The
+    /// addPeer dedup logic then keeps rejecting the live new dial against
+    /// this zombie entry.
+    ///
+    /// Settings here mirror @sym-bot/sym v0.5.3 on the Node side:
+    /// 1s initial idle, 1s probe interval, 3 probes before decl-dead → dead
+    /// sockets reaped in ~4 seconds instead of ~2 hours. Same fix shape
+    /// applied to both sides of the dual-runtime mesh so cross-runtime
+    /// peers (sym-swift ↔ sym-node) recover symmetrically from peer
+    /// restarts.
+    static func tcpParametersWithKeepalive() -> NWParameters {
+        let params = NWParameters.tcp
+        if let tcp = params.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
+            tcp.enableKeepalive = true
+            tcp.keepaliveIdle = 1
+            tcp.keepaliveInterval = 1
+            tcp.keepaliveCount = 3
+        }
+        return params
+    }
+
     /// Outbound connection to a Bonjour endpoint.
     init(outboundTo endpoint: NWEndpoint, identity: SymIdentity) {
-        let parameters = NWParameters.tcp
-        self.connection = NWConnection(to: endpoint, using: parameters)
+        self.connection = NWConnection(to: endpoint, using: Self.tcpParametersWithKeepalive())
         self.identity = identity
         self.isOutbound = true
         self.queue = DispatchQueue(label: "bot.sym.session.\(UUID().uuidString.prefix(8))", qos: .userInitiated)
@@ -104,8 +128,7 @@ final class SymPeerSession {
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
             fatalError("[SYM] Invalid port: \(port)")
         }
-        let parameters = NWParameters.tcp
-        self.connection = NWConnection(host: nwHost, port: nwPort, using: parameters)
+        self.connection = NWConnection(host: nwHost, port: nwPort, using: Self.tcpParametersWithKeepalive())
         self.identity = identity
         self.isOutbound = true
         self.queue = DispatchQueue(label: "bot.sym.session.\(UUID().uuidString.prefix(8))", qos: .userInitiated)
