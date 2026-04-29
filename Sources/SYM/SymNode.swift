@@ -978,28 +978,41 @@ public final class SymNode {
         let outcome: AddPeerOutcome = peerQueue.sync {
             if var existing = self.peers[nodeId] {
                 if let prev = existing.transports["bonjour"] ?? nil {
-                    // Simultaneous-dial collision: both peers Bonjour-discovered
-                    // each other within ~50ms and both initiated outbound TCP. Each
-                    // side now holds two handshaked sessions for the same nodeId
-                    // (one outbound, one inbound). Without explicit dedup the new
-                    // session silently overwrites the prior in the transports dict
-                    // — the orphan keeps a live NWConnection + read loop, eventually
-                    // fires didDisconnectWith, and `removeTransport` strips the
-                    // surviving winner from the dict. Net effect: every connection
-                    // dies within ~1–2s of handshake, application payloads never
-                    // cross the wire.
+                    // Two cases land here:
                     //
-                    // Tie-break deterministically by nodeId so both peers agree on
-                    // the same physical connection without exchanging frames: the
-                    // lower nodeId acts as client and keeps its outbound; the
-                    // higher node keeps the matching inbound. The loser's delegate
-                    // is detached before disconnect (see fall-through below) so its
-                    // teardown can't ripple back through removeTransport.
-                    let preferNew = SymNode.preferNewSessionInDualDial(
-                        localNodeId: self.identity.nodeId,
-                        remoteNodeId: nodeId,
-                        newIsOutbound: isOutbound
-                    )
+                    // (1) Dual-dial collision (different directions): both peers
+                    //     Bonjour-discovered each other and both initiated outbound
+                    //     TCP. Each side holds one outbound + one inbound for the
+                    //     same nodeId. Tie-break deterministically by nodeId — the
+                    //     lower nodeId keeps its outbound, the higher its inbound —
+                    //     so both peers select the same physical socket without
+                    //     exchanging coordination frames.
+                    //
+                    // (2) Same-direction duplicate: a second connection in the same
+                    //     direction as the established one. Happens when the OS
+                    //     newConnectionHandler fires twice for the same advertised
+                    //     service (multipath / TCP-retry / Bonjour-republish), or
+                    //     when discoveryDidFindPeer fires repeatedly and the dedup
+                    //     guard's window let one through. The first is healthy and
+                    //     in active use — replacing it with the duplicate would
+                    //     disconnect the wire pair on the remote side and trigger
+                    //     a peer-left storm. Always reject the duplicate.
+                    //
+                    // The losing session has its delegate detached before disconnect
+                    // (see fall-through below) so its teardown can't ripple through
+                    // removeTransport and clobber the surviving registered session.
+                    let isDualDial = prev.isOutbound != session.isOutbound
+                    let preferNew: Bool
+                    if isDualDial {
+                        preferNew = SymNode.preferNewSessionInDualDial(
+                            localNodeId: self.identity.nodeId,
+                            remoteNodeId: nodeId,
+                            newIsOutbound: isOutbound
+                        )
+                    } else {
+                        // Same direction → keep the established prior, reject duplicate.
+                        preferNew = false
+                    }
                     if preferNew {
                         existing.transports["bonjour"] = session
                         existing.lastSeen = Date()

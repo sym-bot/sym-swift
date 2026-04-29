@@ -533,4 +533,64 @@ final class SimultaneousDialDedupTests: XCTestCase {
         XCTAssertTrue(SymNode.preferNewSessionInDualDial(localNodeId: b, remoteNodeId: a, newIsOutbound: false),
                       "higher nodeId should keep its inbound")
     }
+
+    /// Documents the dedup decision matrix `addPeer` applies when a prior
+    /// session already exists for `nodeId`. The dual-dial tie-break is only
+    /// safe to invoke when prior and new differ in direction. When they
+    /// match (e.g. two inbound sessions in rapid succession from a TCP
+    /// retry, multipath, or repeated newConnectionHandler firing), the
+    /// established prior must be kept and the duplicate rejected.
+    ///
+    /// Without this rule a second inbound replaces a known-good prior
+    /// inbound, the prior is force-disconnected, the wire pair on the
+    /// remote side sees EOF, removeTransport fires there, and peer-left
+    /// storms ensue. (Observed in iPhone↔Mac Catalyst on v0.3.79 before
+    /// this rule was added.)
+    func testSameDirectionDuplicatesAreRejected() {
+        // The decision in addPeer is:
+        //   isDualDial = (prev.isOutbound != session.isOutbound)
+        //   preferNew  = isDualDial ? tieBreak(...) : false
+        //
+        // Restate as a pure function so the test reads as a truth table:
+        func preferNew(localNodeId: String, remoteNodeId: String,
+                       priorIsOutbound: Bool, newIsOutbound: Bool) -> Bool {
+            let isDualDial = priorIsOutbound != newIsOutbound
+            guard isDualDial else { return false }
+            return SymNode.preferNewSessionInDualDial(
+                localNodeId: localNodeId,
+                remoteNodeId: remoteNodeId,
+                newIsOutbound: newIsOutbound
+            )
+        }
+
+        let a = "00000000-0000-7000-8000-000000000001"
+        let b = "00000000-0000-7000-8000-000000000002"
+
+        // Same direction (both inbound) — reject duplicate regardless of
+        // nodeId ordering. This is the bug-fix case.
+        XCTAssertFalse(preferNew(localNodeId: a, remoteNodeId: b,
+                                 priorIsOutbound: false, newIsOutbound: false),
+                       "duplicate inbound on lower nodeId must be rejected")
+        XCTAssertFalse(preferNew(localNodeId: b, remoteNodeId: a,
+                                 priorIsOutbound: false, newIsOutbound: false),
+                       "duplicate inbound on higher nodeId must be rejected")
+
+        // Same direction (both outbound) — also reject duplicate.
+        XCTAssertFalse(preferNew(localNodeId: a, remoteNodeId: b,
+                                 priorIsOutbound: true, newIsOutbound: true),
+                       "duplicate outbound must be rejected")
+        XCTAssertFalse(preferNew(localNodeId: b, remoteNodeId: a,
+                                 priorIsOutbound: true, newIsOutbound: true),
+                       "duplicate outbound must be rejected")
+
+        // Sanity: dual-dial cases still apply tie-break correctly through
+        // this combined function (regression guard so a future refactor
+        // doesn't accidentally change the dual-dial behavior here).
+        XCTAssertFalse(preferNew(localNodeId: a, remoteNodeId: b,
+                                 priorIsOutbound: true, newIsOutbound: false),
+                       "lower nodeId keeps its prior outbound, rejects new inbound under dual-dial")
+        XCTAssertTrue(preferNew(localNodeId: b, remoteNodeId: a,
+                                priorIsOutbound: true, newIsOutbound: false),
+                      "higher nodeId replaces prior outbound with new inbound under dual-dial")
+    }
 }
