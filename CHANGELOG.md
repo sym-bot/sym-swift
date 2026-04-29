@@ -2,6 +2,25 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.83
+
+### Fixed
+
+- **Stale-prior threshold lowered from 10s to 1s** in `SymNode.addPeer`
+  dedup. Mirrors `@sym-bot/sym` v0.5.5 on the Node side. The 10s window
+  shipped in v0.3.81 was too lenient: when a peer process was killed
+  and quickly relaunched, the old run had typically sent a CMB seconds
+  before death, so `lastSeen` was still within the 10s window. The
+  dedup logic then rejected the legitimate redial as a
+  same-direction-duplicate, producing `connection ready → immediate
+  disconnect` with no handshake-complete on the dialing side.
+
+  Lowered to 1s. Sub-second TCP-retry races during initial handshake
+  still keep prior (the case the same-direction-duplicate rule was
+  designed for); peer restarts with ≥1s between kill and re-dial now
+  recover within the application layer instead of being blocked until
+  OS keepalive reaps the socket (~100s).
+
 ## 0.3.82
 
 ### Fixed
