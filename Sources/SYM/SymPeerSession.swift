@@ -89,26 +89,36 @@ final class SymPeerSession {
 
     // MARK: - Init
 
-    /// TCP parameters with aggressive keepalive. Default macOS TCP keepalive
-    /// is `TCP_KEEPALIVE = 7200s` (2 hours) before the first probe, which
-    /// means a dead-but-ESTABLISHED socket (peer process killed without
+    /// TCP parameters with Wi-Fi-friendly keepalive. Default macOS TCP
+    /// keepalive is `TCP_KEEPALIVE = 7200s` (2 hours) before the first probe,
+    /// which means a dead-but-ESTABLISHED socket (peer process killed without
     /// graceful FIN — common on iOS app suspension and Mac Catalyst rebuilds)
     /// stays in ESTABLISHED state on the survivor side for hours. The
     /// addPeer dedup logic then keeps rejecting the live new dial against
     /// this zombie entry.
     ///
-    /// Settings here mirror @sym-bot/sym v0.5.3 on the Node side:
-    /// 1s initial idle, 1s probe interval, 3 probes before decl-dead → dead
-    /// sockets reaped in ~4 seconds instead of ~2 hours. Same fix shape
-    /// applied to both sides of the dual-runtime mesh so cross-runtime
-    /// peers (sym-swift ↔ sym-node) recover symmetrically from peer
-    /// restarts.
+    /// Earlier v0.3.81 tried `idle=1s, interval=1s, count=3` (~4s detection)
+    /// to mirror @sym-bot/sym v0.5.3's `setKeepAlive(true, 1000)`. That was
+    /// far too aggressive for Wi-Fi: handshake-in-progress connections that
+    /// had brief mid-exchange pauses got reaped before the protocol-level
+    /// handshake exchange could complete, producing
+    /// "[SYM] session: handshake timeout after 10s — disconnecting" on
+    /// healthy connections.
+    ///
+    /// v0.3.82 relaxes to `idle=10s, interval=30s, count=3` → ~100s to
+    /// declare dead. Wi-Fi blips of a few seconds don't trigger reaping;
+    /// peer-restart scenarios still recover within ~100s instead of ~2h.
+    /// The application-layer `lastSeen`-stale check in `SymNode.addPeer`
+    /// (also shipped in v0.3.81) handles faster recovery: a peer entry
+    /// older than 10s is treated as stale and the new dial replaces it,
+    /// regardless of whether OS keepalive has reaped the underlying
+    /// socket yet.
     static func tcpParametersWithKeepalive() -> NWParameters {
         let params = NWParameters.tcp
         if let tcp = params.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
             tcp.enableKeepalive = true
-            tcp.keepaliveIdle = 1
-            tcp.keepaliveInterval = 1
+            tcp.keepaliveIdle = 10
+            tcp.keepaliveInterval = 30
             tcp.keepaliveCount = 3
         }
         return params

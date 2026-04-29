@@ -2,6 +2,32 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.82
+
+### Fixed
+
+- **Relaxed TCP keepalive timings.** v0.3.81 set `keepaliveIdle = 1`,
+  `keepaliveInterval = 1`, `keepaliveCount = 3` — ~4 seconds to declare a
+  socket dead. That was far too aggressive for real-world Wi-Fi: brief
+  mid-handshake pauses on healthy connections triggered keepalive reaping
+  before the application-level handshake exchange could complete, producing
+  `[SYM] session: handshake timeout after 10s — disconnecting` even on
+  fully-functional peers.
+
+  v0.3.82 relaxes to `keepaliveIdle = 10`, `keepaliveInterval = 30`,
+  `keepaliveCount = 3` → ~100s to declare dead. Wi-Fi blips of a few
+  seconds during handshake exchange or active CMB flow no longer trigger
+  reaping; peer-restart scenarios still recover within ~100s instead of
+  the macOS default ~2h.
+
+  Application-layer `lastSeen`-stale check in `SymNode.addPeer` from
+  v0.3.81 still handles faster recovery: a peer entry older than 10s
+  is treated as stale and the new dial replaces it, regardless of
+  whether OS keepalive has reaped the underlying socket yet. So the
+  effective recovery time for the user-visible "peer restarted, can
+  re-connect now" case is still ~10s, while OS-level keepalive is the
+  fallback for cases the application layer doesn't see.
+
 ## 0.3.81
 
 ### Fixed
