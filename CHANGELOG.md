@@ -2,6 +2,42 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.81
+
+### Fixed
+
+- **TCP keepalive on every NWConnection** — outbound sessions
+  (`SymPeerSession.init(outboundTo:)` / `init(remoteHost:port:)`) and
+  inbound connections accepted by `NWListener` (`SymDiscovery.startListener`)
+  now use `NWParameters` with `NWProtocolTCP.Options.enableKeepalive = true`,
+  `keepaliveIdle = 1`, `keepaliveInterval = 1`, `keepaliveCount = 3`. Dead
+  remote ends (peer process killed without graceful FIN — common on iOS app
+  suspension and Mac Catalyst rebuilds) are now reaped within ~4 seconds
+  instead of waiting for macOS default `TCP_KEEPALIVE = 7200s` (2 hours).
+
+  Without this, a peer that crashes or restarts leaves the survivor with
+  an ESTABLISHED TCP socket that the OS doesn't reap for hours. The
+  `addPeer` dedup logic then keeps rejecting the live new dial against
+  the zombie entry, producing a permanent connection-flap loop visible in
+  the field as "peer joins, immediately drops, retries, repeat" — most
+  commonly hit on iPhone↔Mac-Catalyst pairs after either side rebuilds.
+
+  Mirrors the fix shipped in `@sym-bot/sym` v0.5.3 on the Node side so
+  cross-runtime peers (sym-swift ↔ sym-node) recover symmetrically from
+  peer restarts.
+
+- **lastSeen-aware stale-prior detection in `addPeer` dedup.** A peer
+  entry whose `lastSeen` is older than `staleAfterSeconds` (10s, matching
+  Node SDK's `_heartbeatInterval` default) is now treated as stale and
+  the new dial replaces it, regardless of dual-dial tie-break or
+  same-direction-duplicate logic. The remote re-dialling is itself
+  evidence its prior is dead — rejecting blocks legitimate reconnects
+  after a peer restart for as long as the OS holds the dead socket.
+
+  Combined with the TCP keepalive above, recovery from peer restart is
+  now seconds, not hours. Mirrors `@sym-bot/sym` v0.5.3 dedup-path
+  staleness check.
+
 ## 0.3.77
 
 ### Added

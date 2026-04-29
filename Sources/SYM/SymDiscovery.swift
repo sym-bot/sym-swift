@@ -88,7 +88,13 @@ final class SymDiscovery {
 
     private func startListener() {
         do {
-            let parameters = NWParameters.tcp
+            // Keepalive applied to the listener parameters so accepted inbound
+            // NWConnections inherit it. Without this, a peer that crashes leaves
+            // us with a dead-but-ESTABLISHED inbound socket that survives ~2h
+            // before macOS keepalive reaps it — the addPeer dedup logic then
+            // rejects every live redial against the zombie. See SymPeerSession
+            // tcpParametersWithKeepalive() for full rationale.
+            let parameters = SymPeerSession.tcpParametersWithKeepalive()
             parameters.includePeerToPeer = true
             let listener = try NWListener(using: parameters)
 
