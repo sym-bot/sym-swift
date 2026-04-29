@@ -987,7 +987,14 @@ public final class SymNode {
     /// TCP keepalive (set in SymPeerSession.tcpParametersWithKeepalive)
     /// reaps within ~4s, but until that fires the lastSeen-age check is
     /// the application-level guard.
-    static let staleAfterSeconds: TimeInterval = 10
+    /// 1-second threshold (NOT heartbeat-interval=10s). When a peer
+    /// process is killed and quickly relaunches, its old run sent a CMB
+    /// seconds before death, so lastSeen is still recent. A 10s threshold
+    /// missed this and the dedup-reject path killed the legitimate redial.
+    /// 1s tolerates sub-second TCP-retry races during initial handshake
+    /// while letting normal peer-restart (≥1s gap between kill and re-dial)
+    /// recover within the application layer.
+    static let staleAfterSeconds: TimeInterval = 1
 
     private func addPeer(_ session: SymPeerSession, nodeId: String, peerName: String, isOutbound: Bool) {
         let outcome: AddPeerOutcome = peerQueue.sync {
