@@ -2,6 +2,27 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.84
+
+### Build
+
+- **SYMCore.xcframework rebuilt with embedded dSYMs.** Each platform slice
+  now ships with a matching `dSYMs/SYMCore.framework.dSYM` bundle alongside
+  the framework. App Store Connect symbolicates SYMCore frames in crash
+  reports instead of leaving them as raw memory addresses. SPM consumers
+  pick up the dSYMs automatically at archive time — no Package.swift
+  changes required on the consumer side.
+
+  The `Scripts/build-xcframework.sh` flow in the (private) sym-core-swift
+  repo now passes `DEBUG_INFORMATION_FORMAT=dwarf-with-dsym` plus
+  `STRIP_INSTALLED_PRODUCT=NO` / `COPY_PHASE_STRIP=NO` /
+  `DEPLOYMENT_POSTPROCESSING=NO` during archive, runs `dsymutil` on each
+  patched binary after `install_name_tool`, then passes `-debug-symbols`
+  per slice into `xcodebuild -create-xcframework`.
+
+  Binary contract identical to v0.3.78 — no API change, no behaviour
+  change. Zip size grew ~1 MB (5.x → 5.9 MB).
+
 ## 0.3.83
 
 ### Fixed
