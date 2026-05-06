@@ -2,6 +2,27 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.85
+
+### Fixed
+
+- **Hotfix for v0.3.84 archive rejection.** App Store Connect rejected
+  v0.3.84 with `Invalid MinimumOSVersion ... is ''` and `Missing Info.plist
+  value` — the heredoc-generated framework `Info.plist` for each slice
+  was missing both `MinimumOSVersion` and `CFBundleSupportedPlatforms`.
+
+  The `Scripts/build-xcframework.sh` in sym-core-swift now writes per-slice
+  values matching `Package.swift`'s platform targets and the binary's
+  `LC_BUILD_VERSION` minos load command:
+
+  - `ios-arm64` → `MinimumOSVersion 17.0`, `CFBundleSupportedPlatforms iPhoneOS`
+  - `ios-sim` → `MinimumOSVersion 17.0`, `CFBundleSupportedPlatforms iPhoneSimulator`
+  - `macos-arm64` → `MinimumOSVersion 14.0`, `CFBundleSupportedPlatforms MacOSX`
+  - `maccatalyst-arm64` → `MinimumOSVersion 17.0`, `CFBundleSupportedPlatforms MacOSX`
+
+  No binary or API change from v0.3.84 — same dSYM bundling. **Consumers
+  on v0.3.84 must update to v0.3.85 to pass App Store validation.**
+
 ## 0.3.84
 
 ### Build
