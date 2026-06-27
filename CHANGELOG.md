@@ -2,6 +2,21 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.87
+
+### Fixed
+
+- **Co-resident group nodes now advertise on the LAN.** An app that joins a
+  cross-app group runs a second `SymNode` (one per group) sharing the device's
+  identity. Both listeners advertised their Bonjour service under the same
+  instance name (`node-id`), so the Network framework published only the first —
+  the main `_melotune._tcp` node appeared on the LAN but the group's
+  `_<group>._tcp` service never did, and the node could never mesh with peers in
+  that group. The Bonjour instance name is now unique per (node, service type);
+  peers still identify the node via the `node-id` TXT entry, and self-filtering
+  is by `node-id`, so the change is transparent to interop. (Bundled
+  `SYMCore.xcframework` unchanged — reuses the v0.3.86 binary.)
+
 ## 0.3.86
 
 ### Added

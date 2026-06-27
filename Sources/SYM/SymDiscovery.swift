@@ -104,8 +104,24 @@ final class SymDiscovery {
             txtRecord["public-key"] = identity.publicKey
             txtRecord["hostname"] = identity.hostname
 
+            // Bonjour instance name must be unique among the services THIS device
+            // advertises. An app that joins cross-app groups runs one SymNode —
+            // hence one listener — per group, all sharing the device's identity.
+            // Keying the instance name on nodeId alone makes those co-resident
+            // listeners collide, and the Network framework publishes only the
+            // first: the group's `_<group>._tcp` service never reaches the LAN
+            // (the main `_melotune._tcp` node still does, masking the bug). Make
+            // it unique per (node, service type). Peers identify the node via the
+            // `node-id` TXT entry, and self-filtering is by `node-id` too (see
+            // handlePeerFound), so this label change is transparent to interop.
+            let groupToken = serviceType
+                .replacingOccurrences(of: "._tcp", with: "")
+                .replacingOccurrences(of: ".", with: "")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+            let instanceName = groupToken.isEmpty ? identity.nodeId : "\(identity.nodeId)-\(groupToken)"
+
             listener.service = NWListener.Service(
-                name: identity.nodeId,
+                name: instanceName,
                 type: serviceType,
                 txtRecord: txtRecord
             )
