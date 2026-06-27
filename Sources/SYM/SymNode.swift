@@ -290,6 +290,9 @@ public final class SymNode {
     /// Section 3.5 + 11.1: peer lifecycle roles from handshake.
     /// Used to apply validator-origin anchor weight 2.0 (Section 6.4).
     private var peerLifecycleRoles: [String: String] = [:]
+    /// Peer Ed25519 signing public keys (base64url), captured from each peer's
+    /// handshake. Used to verify the signatures on CMBs they author (MMP §8.3).
+    private var peerSigningKeys: [String: String] = [:]
 
     /// Section 6.4: CMB keys from validator/anchor nodes — anchor weight multiplier 2.0.
     /// Can't add property to CMBStoreEntry (binary framework), so track externally.
@@ -676,7 +679,12 @@ public final class SymNode {
             method: "SVAF-v2"
         )
 
-        let cmb = CMBEncoder.createCMB(fields: fields, source: name, originTimestamp: ts, lineage: lineage)
+        var cmb = CMBEncoder.createCMB(fields: fields, source: name, originTimestamp: ts, lineage: lineage)
+        // MMP §8.3: sign with our Ed25519 identity key so peers can verify
+        // authenticity. Unsigned only if the identity has no private key.
+        if let privateKey = identity.privateKey {
+            cmb = CMBSigning.sign(cmb, privateKeyBase64URL: privateKey)
+        }
         let content = CMBEncoder.renderContent(from: cmb)
         logger.info("[SYM] remember: \"\(content.prefix(80))\"")
         let entry = CMBStoreEntry(content: content, source: name, tags: tags, originTimestamp: originTimestamp, cmb: cmb)
@@ -1241,6 +1249,11 @@ public final class SymNode {
             if let role = frame.lifecycleRole {
                 peerQueue.sync { self.peerLifecycleRoles[nodeId] = role }
             }
+            // MMP §8.3: remember the peer's Ed25519 signing key so we can verify
+            // the signatures on the CMBs it authors.
+            if let signingKey = frame.publicKey {
+                peerQueue.sync { self.peerSigningKeys[nodeId] = signingKey }
+            }
             break
 
         case .stateSync:
@@ -1291,6 +1304,21 @@ public final class SymNode {
                 }
                 incomingCMB = plainCMB
             }
+
+            // MMP §8.3: verify the author's Ed25519 signature against the key it
+            // announced in its handshake. A present-but-invalid signature is a
+            // forged or tampered CMB — reject it outright (audit-logged, never
+            // surfaced or stored). An unsigned CMB is treated as unverified, not
+            // rejected, for backward compatibility with pre-§8.3 peers. Encrypted
+            // CMBs carry no `sig` (E2E AEAD already authenticates) → unverified.
+            let peerSigningKey: String? = peerQueue.sync { self.peerSigningKeys[nodeId] }
+            let verdict = CMBSigning.verify(incomingCMB, publicKeyBase64URL: peerSigningKey)
+            if verdict.signed && !verdict.valid {
+                logger.error("[SYM] cmb: REJECTED \(incomingCMB.key.prefix(20)) from \(peerName) — bad signature (\(verdict.error ?? "invalid"))")
+                emit(.metric(type: "cmb-signature-rejected", detail: ["from": peerName, "key": incomingCMB.key, "reason": verdict.error ?? "invalid"]))
+                break
+            }
+
             let fieldCount = incomingCMB.fields.count
             let moodText = incomingCMB.fields[.mood]?.text ?? "none"
             logger.info("[SYM] cmb: received CMB \(incomingCMB.key.prefix(20)) from \(peerName) (\(fieldCount) fields, mood: \(moodText))")
