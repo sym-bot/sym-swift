@@ -2,6 +2,22 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.86
+
+### Added
+
+- **Ed25519 CMB signing & verification (MMP §8.3).** Catches the Swift SDK up
+  to `@sym-bot/sym` 0.7.x / `@sym-bot/core` 0.3.38. Nodes now sign every CMB
+  they author with their Ed25519 identity key and verify inbound CMBs against
+  each peer's handshake-announced signing key, so they interoperate as full
+  peers with Node agents (which verify and reject tampered/forged CMBs).
+  - `remember()` signs the authored CMB before storing/broadcasting.
+  - Inbound CMBs with a present-but-invalid signature are rejected
+    (audit-logged, never surfaced); unsigned CMBs stay unverified-not-rejected
+    (pre-§8.3 peers); E2E-encrypted CMBs are authenticated by AEAD.
+  - Bundled `SYMCore.xcframework` rebuilt with `CMBSigning` (Curve25519,
+    canonical `key|author|createdAt` payload — byte-compatible with Node).
+
 ## 0.3.85
 
 ### Fixed
