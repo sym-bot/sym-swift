@@ -318,6 +318,7 @@ public final class SymNode {
     /// is no longer scheduled and `stateSyncInterval` is a no-op preserved
     /// for source compatibility.
     private var stateSyncTimer: Timer?
+    private var statsTimer: Timer?
     private let stateSyncInterval: TimeInterval
 
     private var _running = false
@@ -592,6 +593,14 @@ public final class SymNode {
             self.store.purge(retentionSeconds: self.retentionSeconds)
         }
 
+        // Node-stats self-report — emit on start + every 15s so mesh observers can
+        // display this (possibly sovereign/cross-device) node's emitted/admitted/memory.
+        // Matches Node.js SymNode._emitNodeStats() / _statsTimer (lib/node.js).
+        emitNodeStats()
+        statsTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            self?.emitNodeStats()
+        }
+
         let relayInfo = relayURL != nil ? ", relay: \(relayURL!.absoluteString)" : ""
         logger.info("[SYM] node: started: \(self.name) (\(self.identity.nodeId.prefix(8))\(relayInfo))")
     }
@@ -607,6 +616,8 @@ public final class SymNode {
         stateSyncTimer = nil
         purgeTimer?.invalidate()
         purgeTimer = nil
+        statsTimer?.invalidate()
+        statsTimer = nil
 
         relaySession?.stop()
         relaySession = nil
@@ -898,6 +909,22 @@ public final class SymNode {
     }
 
     // MARK: - Internal Networking
+
+    /// Broadcast this node's store tally (emitted/admitted/memory) to all peers so a mesh
+    /// observer can display it. Matches Node.js SymNode._emitNodeStats() (lib/node.js).
+    private func emitNodeStats() {
+        let tally: (emitted: Int, admitted: Int, memory: Int)
+        if let ms = store as? SymMemoryStore {
+            tally = ms.stats
+        } else {
+            tally = (0, 0, 0)
+        }
+        let frame = SymFrame.nodeStats(
+            name: name, nodeId: identity.nodeId,
+            emitted: tally.emitted, admitted: tally.admitted, memory: tally.memory
+        )
+        broadcastToPeers(frame)
+    }
 
     private func broadcastToPeers(_ frame: SymFrame) {
         let currentPeers: [String: PeerState] = peerQueue.sync { self.peers }
@@ -1636,6 +1663,11 @@ public final class SymNode {
             sendToPeer(nodeId: nodeId, frame: .pong())
 
         case .pong:
+            break
+
+        case .nodeStats:
+            // Emit-only on this node: we broadcast our own tally for observers, but do
+            // not ingest peers' tallies (no local display surface needs them yet).
             break
 
         case .error:

@@ -162,6 +162,22 @@ final class SymMemoryStore: CMBStore, @unchecked Sendable {
         }
     }
 
+    /// Store tally for the node-stats self-report: own emissions (`local/`) vs admitted
+    /// peer CMBs (every other `{peerId}/` subdir) vs total. Mirrors Node.js
+    /// `MemoryStore.stats()` (local vs peer entries).
+    var stats: (emitted: Int, admitted: Int, memory: Int) {
+        guard fileManager.fileExists(atPath: memoriesDir.path) else { return (0, 0, 0) }
+        let subdirs = (try? fileManager.contentsOfDirectory(at: memoriesDir, includingPropertiesForKeys: nil))?.filter(\.hasDirectoryPath) ?? []
+        var emitted = 0
+        var admitted = 0
+        for subdir in subdirs {
+            let n = (try? fileManager.contentsOfDirectory(at: subdir, includingPropertiesForKeys: nil))?
+                .filter { $0.pathExtension == "json" }.count ?? 0
+            if subdir.lastPathComponent == "local" { emitted += n } else { admitted += n }
+        }
+        return (emitted, admitted, emitted + admitted)
+    }
+
     /// Recent CMBs for use as SVAF fusion anchors.
     /// Returns CMBs from entries that have them; generates on-demand for legacy entries.
     func recentCMBs(limit: Int = 5) -> [CognitiveMemoryBlock] {

@@ -72,6 +72,39 @@ public struct E2EMetadata: Codable, Sendable {
     }
 }
 
+// MARK: - Node Stats
+
+/// Self-report tally a node gossips so mesh observers can display its store counts.
+/// Wire: `{ type: "node-stats", stats: { name, nodeId, emitted, admitted, memory, at } }`.
+/// Byte-compatible with Node.js `SymNode._nodeStats()` (lib/node.js); the receiving
+/// Node routes it via `frame-handler.js` `case 'node-stats'` to `_ingestNodeStats`.
+/// `emitted` = own emissions, `admitted` = peer CMBs this node accepted, `memory` = total.
+public struct SymNodeStats: Codable, Sendable {
+    /// This node's display name.
+    public var name: String?
+    /// This node's node ID (the observer ignores a node's own stats by nodeId).
+    public var nodeId: String?
+    /// Count of CMBs this node emitted itself.
+    public var emitted: Int?
+    /// Count of peer CMBs this node admitted (remixed into its store).
+    public var admitted: Int?
+    /// Total CMBs in this node's store.
+    public var memory: Int?
+    /// Emit time (epoch ms).
+    public var at: UInt64?
+
+    /// Create a node-stats payload.
+    public init(name: String? = nil, nodeId: String? = nil, emitted: Int? = nil,
+                admitted: Int? = nil, memory: Int? = nil, at: UInt64? = nil) {
+        self.name = name
+        self.nodeId = nodeId
+        self.emitted = emitted
+        self.admitted = admitted
+        self.memory = memory
+        self.at = at
+    }
+}
+
 // MARK: - Frame Types
 
 /// SYM wire message types. Must match Node.js SymNode exactly.
@@ -108,6 +141,9 @@ public enum SymFrameType: String, Codable, Sendable {
     case ping = "ping"
     /// Heartbeat pong response. See MMP v0.2.1 Section 5.
     case pong = "pong"
+    /// Node self-report tally — emitted/admitted/memory counts a mesh observer
+    /// can display for this (possibly sovereign/cross-device) node. See MMP Section 7.
+    case nodeStats = "node-stats"
 }
 
 // MARK: - Frame
@@ -206,6 +242,7 @@ public struct SymFrame: Codable, Sendable {
         case platform, token, environment, reason
         case code
         case peers
+        case stats
     }
 
     // xMesh insight (peer agent's cognitive state from its own LNN)
@@ -237,6 +274,10 @@ public struct SymFrame: Codable, Sendable {
     // Peer info (gossip)
     /// Known peers for gossip (peer-info). See MMP v0.2.1 Section 5.
     public var peers: [SymPeerGossip]?
+
+    // Node stats (self-report)
+    /// Store tally payload (node-stats). See ``SymNodeStats``.
+    public var stats: SymNodeStats?
 
     /// Create a frame with the given type. All other fields default to nil.
     /// - Parameter type: The ``SymFrameType`` for this frame.
@@ -319,6 +360,17 @@ public struct SymFrame: Codable, Sendable {
 
     static func ping() -> SymFrame { SymFrame(type: .ping) }
     static func pong() -> SymFrame { SymFrame(type: .pong) }
+
+    /// Self-report tally frame. Byte-compatible with Node.js
+    /// `{ type: 'node-stats', stats: { name, nodeId, emitted, admitted, memory, at } }`.
+    static func nodeStats(name: String, nodeId: String, emitted: Int, admitted: Int, memory: Int) -> SymFrame {
+        var frame = SymFrame(type: .nodeStats)
+        frame.stats = SymNodeStats(
+            name: name, nodeId: nodeId, emitted: emitted, admitted: admitted, memory: memory,
+            at: UInt64(Date().timeIntervalSince1970 * 1000)
+        )
+        return frame
+    }
 }
 
 // MARK: - Serialization
