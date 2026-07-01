@@ -766,6 +766,40 @@ public final class SymNode {
         return entry
     }
 
+    /// Relay an already-created CMB to this node's peers WITHOUT storing it or minting a
+    /// new key. Lets ONE logical emission propagate across multiple meshes (one SymNode per
+    /// group) as a SINGLE CMB: call `remember()` once on the primary node, then `relay(cmb)`
+    /// on the others — instead of re-`remember`-ing per node, which mints a fresh key each
+    /// time and double-counts a shared store (emitted N×, an observer on one mesh sees 1/N).
+    public func relay(_ cmb: CognitiveMemoryBlock) {
+        let (currentPeers, currentSecrets): ([String: PeerState], [String: SymmetricKey]) = peerQueue.sync {
+            (self.peers, self.peerSharedSecrets)
+        }
+        var baseFrame = SymFrame.cmb(
+            key: cmb.key,
+            content: CMBEncoder.renderContent(from: cmb),
+            source: cmb.source,
+            tags: [],
+            originTimestamp: cmb.originTimestamp,
+            storedAt: cmb.storedAt
+        )
+        baseFrame.cmb = cmb
+
+        for (peerId, _) in currentPeers {
+            if let sharedSecret = currentSecrets[peerId],
+               let encrypted = E2ECrypto.encryptFields(cmb.fields, sharedSecret: sharedSecret) {
+                var encFrame = baseFrame
+                encFrame.encryptedFields = encrypted.ciphertext
+                encFrame.e2e = E2EMetadata(nonce: encrypted.nonce)
+                encFrame.cmb = nil
+                sendToPeer(nodeId: peerId, frame: encFrame)
+            } else {
+                sendToPeer(nodeId: peerId, frame: baseFrame)
+            }
+        }
+        logger.info("[SYM] relay: \(cmb.key.prefix(20)) → \(currentPeers.count) peers")
+    }
+
     /// Search memories across local and peer stores by keyword. See MMP v0.2.0 Section 6.
     /// - Parameter query: Search keyword matched against content, key, and tags.
     /// - Returns: Matching entries sorted by most recent first.
