@@ -2,6 +2,21 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.89
+
+### Added
+
+- **`SymNode.relay(_:)` — propagate one CMB across meshes without re-storing.** A node emitting the same logical CMB across multiple meshes (one `SymNode` per group, all sharing the device store) should send ONE CMB, not `remember()` it per node — the latter mints a fresh random key each time and double-counts the shared store (the node reports emitted N×, while an observer on a single mesh sees only 1/N). `relay(cmb)` broadcasts an existing CMB (same key) to a node's peers without storing it, so a consumer can `remember()` once on a primary node and `relay()` to the rest. (Bundled `SYMCore.xcframework` unchanged — reuses the v0.3.86 binary.)
+
+## 0.3.88
+
+### Added
+
+- **Node-stats self-report — sovereign nodes report emitted/admitted/memory to observers.** Catches the Swift SDK up to `@sym-bot/sym` 0.7.26. A cross-device node (e.g. MeloTune on iOS) had no way to report its store tally over the mesh, so an observer cockpit showed it as `0 emitted / — admitted`. Nodes now gossip a `node-stats` frame every 15s (and on start), byte-compatible with the Node wire format `{ type: 'node-stats', stats: { name, nodeId, emitted, admitted, memory, at } }`:
+  - `SymFrameType.nodeStats` + `SymNodeStats` payload + factory.
+  - `SymMemoryStore.stats`: own emissions (`local/`) vs admitted peer CMBs (`{peerId}/`) vs total, mirroring the Node store's local-vs-peer split.
+  - `SymNode.emitNodeStats()` on a 15s timer, broadcast to all peers. Emit-only (no local consumer). 71/71 tests. (Bundled `SYMCore.xcframework` unchanged — reuses the v0.3.86 binary.)
+
 ## 0.3.87
 
 ### Fixed
