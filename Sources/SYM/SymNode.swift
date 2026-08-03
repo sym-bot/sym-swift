@@ -823,6 +823,132 @@ public final class SymNode {
         // Intentionally a no-op. See doc comment.
     }
 
+    // MARK: - Rule A (§7.5) — v2 emission on the author's own HEAD
+
+    /// The last v2 address this node minted, persisted so the chain survives
+    /// a restart. One HEAD per agent: the sequence, without a sequence number
+    /// — parents ride inside signingPayloadV2, so an author's emissions form
+    /// a SIGNED chain and position in it IS the ordering (the Node control
+    /// plane reads exactly this; an unchained iOS node shows up as
+    /// permanently unaccounted-for in its gauges).
+    private var v2Head: String? = nil
+    private var v2HeadLoaded = false
+
+    private var v2HeadFile: URL {
+        SymIdentityManager.nodeDirectory(for: name).appendingPathComponent("v2-head.json")
+    }
+
+    private func loadV2HeadIfNeeded() {
+        guard !v2HeadLoaded else { return }
+        v2HeadLoaded = true
+        if let data = try? Data(contentsOf: v2HeadFile),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
+            v2Head = obj["head"]
+        }
+    }
+
+    private func persistV2Head() {
+        guard let head = v2Head,
+              let data = try? JSONSerialization.data(withJSONObject: ["head": head]) else { return }
+        try? data.write(to: v2HeadFile)
+    }
+
+    /// The Ed25519 signing key this node announces in its handshake — the
+    /// key peers verify its emissions against. Public because it already is:
+    /// every handshake broadcasts it.
+    public var signingPublicKey: String? { identity.publicKey }
+
+    public struct V2Emission {
+        public let key: String
+        public let record: CMBRecordV2
+        /// True → re-assertion of the node's own HEAD: cited, not minted.
+        /// Nothing stored, nothing broadcast, HEAD unmoved, lineage cleared
+        /// (a caller may persist what it is handed; it must not leave here
+        /// claiming descent from itself).
+        public let collapsed: Bool
+    }
+
+    /// Emit a v2 two-section record, signed, parented on this node's own
+    /// HEAD (Rule A). OPT-IN: flat emission stays the default until the
+    /// fleet census clears — a pre-boundary iOS peer cannot read a v2 frame,
+    /// and that rollout call is the gate-keeper's, not this code's.
+    @discardableResult
+    public func rememberV2(fields: [String: Any],
+                           to: String? = nil,
+                           extraParents: [String] = []) -> V2Emission? {
+        loadV2HeadIfNeeded()
+
+        // Rule A: the agent's own HEAD is always a parent; explicit parents
+        // (peer descent) join it. Order is irrelevant — signing sorts bytewise.
+        var parents = extraParents
+        if let head = v2Head, !parents.contains(head) { parents.append(head) }
+        let lineage = parents.isEmpty ? nil : CMBLineageV2(parents: parents, method: "SVAF-v2")
+
+        guard var record = try? CMBRecordV2.create(
+            fields: fields, createdBy: name, lineage: lineage, to: to) else {
+            logger.error("[SYM] rememberV2: record creation failed (missing fields or author)")
+            return nil
+        }
+
+        // §7.5 COLLAPSE-BEFORE-MINT [MUST]: re-asserting content identical to
+        // your own HEAD produces the SAME ADDRESS as your HEAD; parenting it
+        // on [own HEAD] writes the self-edge K→K. A mint-level refusal, not a
+        // store-level dedup — nothing minted, HEAD unmoved, the caller handed
+        // the address that already says this.
+        if let head = v2Head, record.metadata.key == head {
+            record.metadata.lineage = nil
+            emit(.metric(type: "cmb-collapsed", detail: ["key": record.metadata.key, "reason": "identical-to-own-head"]))
+            logger.info("[SYM] rememberV2: collapsed — re-assertion of own HEAD \(record.metadata.key.prefix(16))… cited, not minted")
+            return V2Emission(key: record.metadata.key, record: record, collapsed: true)
+        }
+
+        // Sign: parents are inside signingPayloadV2, so the chain is
+        // unforgeable — rewriting it breaks the signature.
+        if let privateKey = identity.privateKey {
+            if let signed = try? CMBSigningV2.sign(record, privateKeyB64url: privateKey) {
+                record = signed
+            } else {
+                logger.error("[SYM] rememberV2: signing failed — emitting unsigned")
+            }
+        }
+
+        // Store the receiver-local flat projection so this node's own SVAF
+        // anchors and recall see its emissions (vectors receiver-local, per
+        // §7.1 — same posture as the receive bridge).
+        var flatFields: [CMBField: CMBFieldVector] = [:]
+        for (fieldName, field) in record.fields {
+            guard let cat7 = CMBField(rawValue: fieldName) else { continue }
+            flatFields[cat7] = CMBEncoder.encodeField(field.text,
+                                                      valence: field.valence.map { Float($0) },
+                                                      arousal: field.arousal.map { Float($0) })
+        }
+        let now = UInt64(Date().timeIntervalSince1970 * 1000)
+        let flat = CognitiveMemoryBlock(
+            key: record.metadata.key, fields: flatFields, source: name, createdBy: name,
+            createdAt: record.metadata.createdTimestamp,
+            lineage: record.metadata.lineage.map { CMBLineage(parents: $0.parents) },
+            originTimestamp: record.metadata.createdTimestamp, storedAt: now, confidence: 0.9)
+        let entry = SymMemoryEntry(
+            key: record.metadata.key,
+            content: flatFields.map { "\($0.key.rawValue): \($0.value.text)" }.sorted().joined(separator: "; "),
+            source: name, tags: [], originTimestamp: record.metadata.createdTimestamp,
+            storedAt: now, cmb: flat)
+        _ = store.write(entry: entry)
+
+        // HEAD advances only when something was actually minted.
+        v2Head = record.metadata.key
+        persistV2Head()
+
+        // Broadcast the v2 record (serialize() carries cmbV2 under "cmb").
+        var frame = SymFrame(type: .cmb)
+        frame.source = name
+        frame.cmbV2 = record
+        broadcastToPeers(frame)
+
+        emit(.metric(type: "cmb-produced-v2", detail: ["key": record.metadata.key]))
+        return V2Emission(key: record.metadata.key, record: record, collapsed: false)
+    }
+
     // MARK: - Mood
 
     /// Broadcast mood to all peers. See MMP v0.2.0 Section 9.3.

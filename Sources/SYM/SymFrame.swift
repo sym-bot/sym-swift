@@ -390,7 +390,19 @@ extension SymFrame {
     /// Serialize to length-prefixed JSON data for the wire.
     func serialize() throws -> Data {
         let encoder = JSONEncoder()
-        let json = try encoder.encode(self)
+        var json = try encoder.encode(self)
+
+        // cmbV2 is outside CodingKeys (the flat decode must never trip on
+        // it), so a v2-carrying frame is assembled here: the record encodes
+        // separately and joins the frame object under the same "cmb" key the
+        // rescue parser reads on the far side. Exactly one of cmb/cmbV2 is
+        // ever set, so the key cannot collide.
+        if let record = cmbV2,
+           var obj = try JSONSerialization.jsonObject(with: json) as? [String: Any] {
+            let recordJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record))
+            obj["cmb"] = recordJSON
+            json = try JSONSerialization.data(withJSONObject: obj)
+        }
 
         var length = UInt32(json.count).bigEndian
         var data = Data(bytes: &length, count: 4)
