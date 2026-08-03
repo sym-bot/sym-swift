@@ -217,6 +217,13 @@ public struct SymFrame: Codable, Sendable {
     /// SVAF v2 Cognitive Memory Block. See MMP v0.2.0 Section 9.
     public var cmb: CognitiveMemoryBlock?
 
+    /// A boundary (two-section, §7.1) record that arrived on the `cmb`
+    /// channel. NOT in CodingKeys — synthesized Codable never touches it
+    /// (the `= nil` default is what makes that legal); the frame parser
+    /// attaches it on the second-pass decode when the flat decode fails on a
+    /// v2 payload. Exactly one of `cmb` / `cmbV2` is set for a cmb frame.
+    public var cmbV2: WireRecordV2? = nil
+
     /// Encrypted CMB fields (base64 ciphertext with appended auth tag).
     /// When present, `cmb.fields` is empty and must be decrypted using `_e2e.nonce`.
     public var encryptedFields: String?
@@ -425,6 +432,17 @@ final class SymFrameParser {
                 let frame = try JSONDecoder().decode(SymFrame.self, from: jsonData)
                 frames.append(frame)
             } catch {
+                // Second pass: a boundary (two-section) record in the `cmb`
+                // member fails the flat decode and — under synthesized
+                // Codable — used to kill the WHOLE frame, so iOS silently
+                // dropped every v2 record from current JS nodes. Detect that
+                // exact shape, decode the v2 record separately, and re-decode
+                // the frame with the member excised. Anything else still
+                // fails loudly, exactly as before.
+                if let rescued = rescueV2CMBFrame(jsonData) {
+                    frames.append(rescued)
+                    continue
+                }
                 let preview = String(data: jsonData.prefix(200), encoding: .utf8) ?? "binary"
                 logger.error("[SYM] frame: decode failed: \(error) — \(preview)")
             }
@@ -436,5 +454,26 @@ final class SymFrameParser {
     /// Reset the parser state.
     func reset() {
         buffer.removeAll()
+    }
+
+    /// Rescue a frame whose `cmb` member is a v2 two-section record.
+    /// Returns nil unless the payload is exactly that shape — this is a
+    /// narrow rescue, not a general tolerant decode.
+    private func rescueV2CMBFrame(_ jsonData: Data) -> SymFrame? {
+        guard var obj = (try? JSONSerialization.jsonObject(with: jsonData)) as? [String: Any],
+              WireRecordV2.looksLikeV2(obj["cmb"]) else { return nil }
+
+        let cmbJSON = obj["cmb"]
+        obj.removeValue(forKey: "cmb")
+
+        guard let strippedData = try? JSONSerialization.data(withJSONObject: obj),
+              var frame = try? JSONDecoder().decode(SymFrame.self, from: strippedData),
+              let cmbData = try? JSONSerialization.data(withJSONObject: cmbJSON as Any),
+              let record = try? JSONDecoder().decode(WireRecordV2.self, from: cmbData) else {
+            return nil
+        }
+        frame.cmbV2 = record
+        logger.info("[SYM] frame: boundary (v2) record rescued from \(frame.name ?? frame.source ?? "peer")")
+        return frame
     }
 }
