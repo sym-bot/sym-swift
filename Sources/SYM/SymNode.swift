@@ -1288,7 +1288,11 @@ public final class SymNode {
         }
     }
 
-    private func handlePeerFrame(nodeId: String, peerName: String, frame: SymFrame) {
+    // Internal (not private) so the receive path is drivable from tests:
+    // the CTO demonstrated that with this private, the v2 verification call
+    // could be replaced by a constant and the whole suite stayed green — the
+    // verifier was proven, the node's USE of it was not.
+    func handlePeerFrame(nodeId: String, peerName: String, frame: SymFrame) {
         peerQueue.sync { self.peers[nodeId]?.lastSeen = Date() }
 
         switch frame.type {
@@ -1404,9 +1408,17 @@ public final class SymNode {
                 var fields: [CMBField: CMBFieldVector] = [:]
                 for (name, field) in v2.fields {
                     guard let cat7 = CMBField(rawValue: name) else { continue }
-                    fields[cat7] = CMBFieldVector(text: field.text, vector: [],
-                                                  valence: field.valence.map { Float($0) },
-                                                  arousal: field.arousal.map { Float($0) })
+                    // RECEIVER-LOCAL ENCODING (§7.1, store-none): a v2 record
+                    // carries no vectors — deliberately, so nothing a relay
+                    // could tamper with reaches drift computation. This node
+                    // encodes from the field's own text, with its own kernel,
+                    // at receive time. Without this the bridged fields carried
+                    // empty vectors and SVAF scored every field maximally
+                    // drifted — intact records were rejected downstream of a
+                    // VERIFIED signature (found by the wiring tests).
+                    fields[cat7] = CMBEncoder.encodeField(field.text,
+                                                          valence: field.valence.map { Float($0) },
+                                                          arousal: field.arousal.map { Float($0) })
                 }
                 let now = UInt64(Date().timeIntervalSince1970 * 1000)
                 incomingCMB = CognitiveMemoryBlock(
