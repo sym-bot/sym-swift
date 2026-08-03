@@ -1348,12 +1348,30 @@ public final class SymNode {
                 }
                 logger.info("[SYM] e2e: decrypted \(decryptedFields.count) CMB fields from \(peerName)")
 
+                // FAIL CLOSED on identity — never fabricate it. This used to
+                // fall back to an invented `cmb-<UUID8>` key and to the
+                // DELIVERING PEER as author. Both are the defect class the
+                // boundary release deletes (sym-core e907a12 killed the same
+                // shape in JS): an invented address is a block nobody minted,
+                // and holder-as-author is exactly what §7.2 forbids — the
+                // author is signature-bound, the deliverer is just transport.
+                // A frame that names neither its key nor its author is not a
+                // CMB; drop it loudly rather than store a forgery of one.
+                guard let frameKey = frame.key, !frameKey.isEmpty else {
+                    logger.warning("[SYM] e2e: encrypted CMB from \(peerName) carries no key — dropping (identity is never fabricated)")
+                    break
+                }
+                guard let author = frame.source, !author.isEmpty else {
+                    logger.warning("[SYM] e2e: encrypted CMB from \(peerName) names no author — dropping (the delivering peer is transport, not authorship)")
+                    break
+                }
+
                 // Reconstruct CMB with decrypted fields
                 incomingCMB = CognitiveMemoryBlock(
-                    key: frame.key ?? "cmb-\(UUID().uuidString.prefix(8))",
+                    key: frameKey,
                     fields: decryptedFields,
-                    source: frame.source ?? peerName,
-                    createdBy: frame.source ?? peerName,
+                    source: author,
+                    createdBy: author,
                     originTimestamp: frame.originTimestamp ?? frame.timestamp ?? UInt64(Date().timeIntervalSince1970 * 1000),
                     storedAt: UInt64(Date().timeIntervalSince1970 * 1000),
                     confidence: frame.confidence ?? 0.8
