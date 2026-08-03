@@ -1377,23 +1377,36 @@ public final class SymNode {
                     confidence: frame.confidence ?? 0.8
                 )
             } else if let v2 = frame.cmbV2 {
-                // Boundary (two-section) record from a current JS node. Until
-                // the SYMCore xcframework ships CMBRecordV2 + v2 signature
-                // verification, bridge it into the flat pipeline UNVERIFIED —
-                // readable and clearly marked, never silently trusted, and
-                // never dropped (which is what happened before this branch).
-                //
-                // Identity comes from the record's OWN metadata — the section
-                // the mesh proves — and fails closed: no key or no author
-                // means no CMB, never a fabricated one.
+                // Boundary (two-section) record — VERIFIED path, live since
+                // SYMCore v0.3.90 ships CMBRecordV2 + CMBSigningV2. Identity
+                // comes from the record's OWN metadata and fails closed: no
+                // key or no author means no CMB, never a fabricated one.
                 guard !v2.metadata.key.isEmpty, !v2.metadata.createdBy.isEmpty else {
                     logger.warning("[SYM] cmb: v2 record from \(peerName) missing key/author in metadata — dropping")
                     break
                 }
+
+                // §7.6 verification with the REAL v2 verifier, against the
+                // key the peer announced in its handshake. Same stance as the
+                // flat path below: present-but-invalid → rejected outright;
+                // unsigned or no-known-key → unverified, not rejected. Note
+                // content integrity is checked INSIDE verify (recomputed
+                // block key) — a tampered field fails as content-mismatch
+                // even before the signature is examined.
+                let v2SigningKey: String? = peerQueue.sync { self.peerSigningKeys[nodeId] }
+                let v2Verdict = CMBSigningV2.verify(v2, publicKeyB64url: v2SigningKey)
+                if v2Verdict.signed && !v2Verdict.valid && v2Verdict.error != "no-public-key" {
+                    logger.error("[SYM] cmb: REJECTED v2 \(v2.metadata.key.prefix(20)) from \(peerName) — \(v2Verdict.error ?? "invalid")")
+                    emit(.metric(type: "cmb-signature-rejected", detail: ["from": peerName, "key": v2.metadata.key, "reason": v2Verdict.error ?? "invalid"]))
+                    break
+                }
+
                 var fields: [CMBField: CMBFieldVector] = [:]
                 for (name, field) in v2.fields {
                     guard let cat7 = CMBField(rawValue: name) else { continue }
-                    fields[cat7] = CMBFieldVector(text: field.text, vector: [])
+                    fields[cat7] = CMBFieldVector(text: field.text, vector: [],
+                                                  valence: field.valence.map { Float($0) },
+                                                  arousal: field.arousal.map { Float($0) })
                 }
                 let now = UInt64(Date().timeIntervalSince1970 * 1000)
                 incomingCMB = CognitiveMemoryBlock(
@@ -1402,16 +1415,11 @@ public final class SymNode {
                     source: v2.metadata.createdBy,
                     createdBy: v2.metadata.createdBy,
                     lineage: (v2.metadata.lineage?.parents).map { CMBLineage(parents: $0, ancestors: [], method: v2.metadata.lineage?.method ?? "v2-bridge") },
-                    originTimestamp: v2.metadata.createdTimestamp ?? now,
+                    originTimestamp: v2.metadata.createdTimestamp,
                     storedAt: now,
                     confidence: frame.confidence ?? 0.8
                 )
-                // DELIBERATELY NOT copied: v2.metadata.sig/sigAlg. Feeding a
-                // v2 signature into the v1 verifier would fail it as forged
-                // and poison the author's standing; leaving it off admits the
-                // record on the same terms as any unsigned CMB — SVAF still
-                // gates content — and verification arrives with SYMCore v2.
-                logger.info("[SYM] cmb: v2 record \(v2.metadata.key.prefix(20)) from \(v2.metadata.createdBy) bridged unverified-v2 (SYMCore v2 pending)")
+                logger.info("[SYM] cmb: v2 record \(v2.metadata.key.prefix(20)) from \(v2.metadata.createdBy) — \(v2Verdict.valid ? "VERIFIED" : "unverified (\(v2Verdict.error ?? "unsigned"))")")
             } else {
                 guard let plainCMB = frame.cmb else {
                     logger.warning("[SYM] cmb: missing CMB in frame from \(peerName)")

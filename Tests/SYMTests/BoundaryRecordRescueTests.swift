@@ -11,6 +11,7 @@
 //
 
 import Foundation
+import SYMCore
 import XCTest
 @testable import SYM
 
@@ -61,7 +62,7 @@ final class BoundaryRecordRescueTests: XCTestCase {
                        "identity comes from the record's own metadata, never the delivering peer")
         XCTAssertEqual(v2?.fields["focus"]?.text, "boundary record reaches iOS")
         XCTAssertEqual(v2?.fields["mood"]?.valence, 0.2)
-        XCTAssertEqual(v2?.metadata.lineage?.parents?.count, 1)
+        XCTAssertEqual(v2?.metadata.lineage?.parents.count, 1)
         XCTAssertEqual(v2?.metadata.sigAlg, "ed25519",
                        "the signature is carried for the SYMCore-v2 verifier; the bridge deliberately does not feed it to the v1 verifier")
     }
@@ -96,6 +97,39 @@ final class BoundaryRecordRescueTests: XCTestCase {
         """
         let parsed = SymFrameParser().feed(wireFrame(garbage))
         XCTAssertTrue(parsed.isEmpty, "not-a-record shapes are not rescued")
+    }
+
+    func testSignedV2RecordSurvivesTheWireAndVerifies() throws {
+        // End to end: sign with the conformance TEST keypair (never an
+        // identity), serialize into a frame, parse through the rescue, then
+        // verify the parsed record exactly as SymNode's bridge does. This is
+        // the moment "unverified-v2" became "verified" — pin it.
+        let privB64 = "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI"
+        let pubB64 = "IVL40Zt5HSRFMkLhXy6rbLfP-ntqXtMAl5YOBpiB2xI"
+
+        let record = try CMBRecordV2.create(
+            fields: ["focus": "verified end to end", "issue": "none", "intent": "prove",
+                     "motivation": "interop", "commitment": "exact bytes",
+                     "perspective": "test", "mood": ["text": "calm"]],
+            createdBy: "vector-author@conformance",
+            now: 1_785_700_000_000)
+        let signed = try CMBSigningV2.sign(record, privateKeyB64url: privB64)
+
+        let cmbJSON = String(data: try JSONEncoder().encode(signed), encoding: .utf8)!
+        let frameJSON = #"{"type":"cmb","source":"vector-author@conformance","cmb":"# + cmbJSON + "}"
+        let parsed = SymFrameParser().feed(wireFrame(frameJSON))
+        let arrived = try XCTUnwrap(parsed.first?.cmbV2)
+
+        let verdict = CMBSigningV2.verify(arrived, publicKeyB64url: pubB64)
+        XCTAssertTrue(verdict.valid, "signed on one side of the wire, verified on the other: \(verdict.error ?? "")")
+
+        // And a tampered field fails as content-mismatch — integrity is
+        // checked on the RECOMPUTED key before the signature is examined.
+        var tampered = arrived
+        tampered.fields["focus"]?.text = "tampered in flight"
+        let bad = CMBSigningV2.verify(tampered, publicKeyB64url: pubB64)
+        XCTAssertFalse(bad.valid)
+        XCTAssertEqual(bad.error, "content-mismatch")
     }
 
     func testV2MissingIdentityIsNotRescuedIntoAForgery() {

@@ -9,6 +9,7 @@
 //
 
 import Foundation
+import SYMCore
 import os.log
 
 // MARK: - Peer Gossip
@@ -218,11 +219,13 @@ public struct SymFrame: Codable, Sendable {
     public var cmb: CognitiveMemoryBlock?
 
     /// A boundary (two-section, §7.1) record that arrived on the `cmb`
-    /// channel. NOT in CodingKeys — synthesized Codable never touches it
-    /// (the `= nil` default is what makes that legal); the frame parser
-    /// attaches it on the second-pass decode when the flat decode fails on a
-    /// v2 payload. Exactly one of `cmb` / `cmbV2` is set for a cmb frame.
-    public var cmbV2: WireRecordV2? = nil
+    /// channel — the REAL SYMCore type since v0.3.90; the temporary
+    /// WireRecordV2 shim is gone. NOT in CodingKeys — synthesized Codable
+    /// never touches it (the `= nil` default is what makes that legal); the
+    /// frame parser attaches it on the second-pass decode when the flat
+    /// decode fails on a v2 payload. Exactly one of `cmb` / `cmbV2` is set
+    /// for a cmb frame.
+    public var cmbV2: CMBRecordV2? = nil
 
     /// Encrypted CMB fields (base64 ciphertext with appended auth tag).
     /// When present, `cmb.fields` is empty and must be decrypted using `_e2e.nonce`.
@@ -458,10 +461,14 @@ final class SymFrameParser {
 
     /// Rescue a frame whose `cmb` member is a v2 two-section record.
     /// Returns nil unless the payload is exactly that shape — this is a
-    /// narrow rescue, not a general tolerant decode.
+    /// narrow rescue, not a general tolerant decode. (v2 iff the member
+    /// carries a metadata object with a string key; the flat model has
+    /// neither.)
     private func rescueV2CMBFrame(_ jsonData: Data) -> SymFrame? {
         guard var obj = (try? JSONSerialization.jsonObject(with: jsonData)) as? [String: Any],
-              WireRecordV2.looksLikeV2(obj["cmb"]) else { return nil }
+              let cmbObj = obj["cmb"] as? [String: Any],
+              let metadata = cmbObj["metadata"] as? [String: Any],
+              metadata["key"] is String else { return nil }
 
         let cmbJSON = obj["cmb"]
         obj.removeValue(forKey: "cmb")
@@ -469,7 +476,7 @@ final class SymFrameParser {
         guard let strippedData = try? JSONSerialization.data(withJSONObject: obj),
               var frame = try? JSONDecoder().decode(SymFrame.self, from: strippedData),
               let cmbData = try? JSONSerialization.data(withJSONObject: cmbJSON as Any),
-              let record = try? JSONDecoder().decode(WireRecordV2.self, from: cmbData) else {
+              let record = try? JSONDecoder().decode(CMBRecordV2.self, from: cmbData) else {
             return nil
         }
         frame.cmbV2 = record
