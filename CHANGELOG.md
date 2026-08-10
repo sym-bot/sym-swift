@@ -2,6 +2,18 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.94
+
+### Added
+
+- **Admission across seven cognitive categories reaches the SDK.** Bundled `SYMCore.xcframework` → **v0.3.94**, which adds `SVAFCategories` (per-category drift, the five verdicts, both silent causes, `exactHeld` by content address), `SVAFShadow` (design C in shadow — a redundancy-floor cut that decides nothing and never touches the signed payload), and `SVAFAdmissionPolicy` (the receiver's thresholds are refused rather than invented when incomplete). Held to the same published `conformance/svaf-baseline.json` vectors as the JS reference implementation.
+
+  Until now this SDK could only report one block-level decision per CMB, so a peer's signal with relevant `mood` and irrelevant `focus` was indistinguishable from one that was uniformly mediocre.
+
+### Changed
+
+- **An anchor that states no confidence contributes at full weight** in the new per-category path, rather than at an invented `0.8`. This changes drift arithmetic for stores whose anchors carry no confidence. The existing `SVAFV2` / `SVAFFusion` entry points are unchanged.
+
 ## 0.3.93
 
 ### Fixed
