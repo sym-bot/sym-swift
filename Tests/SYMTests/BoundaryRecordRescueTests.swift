@@ -28,7 +28,7 @@ final class BoundaryRecordRescueTests: XCTestCase {
     private let v2FrameJSON = """
     {"type":"cmb","source":"claude-sym-research@sym-bot-team","timestamp":1785700000000,
      "cmb":{
-       "fields":{
+       "categories":{
          "focus":{"text":"boundary record reaches iOS","meta":{"key":"aa11","parents":[]}},
          "issue":{"text":"none","meta":{"key":"bb22","parents":["cmb-parent#issue~d1"]}},
          "intent":{"text":"verify","meta":{"key":"cc33","parents":[]}},
@@ -79,7 +79,7 @@ final class BoundaryRecordRescueTests: XCTestCase {
         // The rescue must never intercept the flat path.
         let flat = """
         {"type":"cmb","source":"peer-a",
-         "cmb":{"key":"cmb-abc123","fields":{"focus":{"text":"flat record","vector":[]}},
+         "cmb":{"key":"cmb-abc123","categories":{"focus":{"text":"flat record","vector":[]}},
                 "source":"peer-a","createdBy":"peer-a","createdAt":1785700000000,
                 "originTimestamp":1785700000000,"storedAt":1785700000000,"confidence":0.8}}
         """
@@ -137,9 +137,43 @@ final class BoundaryRecordRescueTests: XCTestCase {
         // drops (as before), and nothing downstream can fabricate identity.
         let noKey = """
         {"type":"cmb","source":"peer-a",
-         "cmb":{"fields":{"focus":{"text":"x"}},"metadata":{"createdBy":"someone"}}}
+         "cmb":{"categories":{"focus":{"text":"x"}},"metadata":{"createdBy":"someone"}}}
         """
         let parsed = SymFrameParser().feed(wireFrame(noKey))
         XCTAssertTrue(parsed.isEmpty, "no key → not a v2 record → no rescue, no fabrication")
+    }
+
+    // MARK: - The container name, pinned at the layer that dropped the frame
+
+    /// Half of what a live peer emits carries no per-field `meta`: measured
+    /// 471 of 903 records in one node's store. The fixtures above all carry it,
+    /// so none of them could see this — the record arrived and the rescue
+    /// returned nil, indistinguishable from a quiet mesh.
+    func testPeerRecordWithoutPerFieldMetaIsRescued() throws {
+        let noMeta = """
+        {"type":"cmb","source":"claude-sym-cto@hongwei-mac",
+         "cmb":{"categories":{"focus":{"text":"no per-field meta on this one"},
+                              "mood":{"text":"calm"}},
+                "metadata":{"key":"cmb-f128fca6daf9241602d37522ccba6974d68ce670bce705db6b496f90763d0ad5",
+                            "createdBy":"claude-sym-cto@hongwei-mac",
+                            "createdTimestamp":1786360296251,"lineage":null,"room":null,"to":null}}}
+        """
+        let parsed = SymFrameParser().feed(wireFrame(noMeta))
+        let record = try XCTUnwrap(parsed.first?.cmbV2,
+                                   "a record without per-field meta is a record, not a broken frame")
+        XCTAssertEqual(record.fields["focus"]?.text, "no per-field meta on this one")
+    }
+
+    /// A peer still speaking the pre-v1.1 container must not be quietly
+    /// half-accepted. It drops — but SYMCore names it `legacyFieldsContainer`
+    /// rather than raising a bare keyNotFound, so the reason is recoverable.
+    func testPreV11FieldsContainerDoesNotSneakThrough() {
+        let legacy = """
+        {"type":"cmb","source":"peer-a",
+         "cmb":{"fields":{"focus":{"text":"old container"}},
+                "metadata":{"key":"cmb-abc123","createdBy":"peer-a","createdTimestamp":1785700000000}}}
+        """
+        let parsed = SymFrameParser().feed(wireFrame(legacy))
+        XCTAssertTrue(parsed.isEmpty, "the pre-v1.1 container is refused, not partially read")
     }
 }

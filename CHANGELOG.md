@@ -2,6 +2,20 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.92
+
+### Fixed
+
+- **iOS can hear the mesh again — the CMB wire container is `categories`, not `fields`.** MMP v1.1 §8.2 renamed the container holding the seven CAT7 members. The JS side moved and this SDK did not, so on the bundled v0.3.90 binary *every* CMB from a current peer was dropped and every CMB emitted from iOS was refused: `@sym-bot/core` 0.9.3 reads only `.categories` and throws `"CMB requires categories"` on anything else. Because the frame parser's rescue path wraps its decode in `try?`, the break presented as a quiet mesh rather than an error — no log line, no failed frame, just nothing arriving.
+
+  Bundled `SYMCore.xcframework` bumped to **v0.3.92**, which carries the fix (`sym-core-swift` @ `v0.3.92`). No key moves and no signature is invalidated: `blockKeyV2` hashes the field texts in CAT7 order, never the container name.
+
+- **Records without per-field `meta` now arrive.** Roughly half of what a live peer emits carries none — measured 471 of 903 records with a `categories` container in one node's store, same emitter, same day, interleaved with the rest. The SDK required it, so those dropped too. `meta.key` is recomputed with the same `fieldKeyV1` the emitter would have used; `parents` already defined empty as "no descent asserted".
+
+### Changed
+
+- **The rescue fixtures now carry the shape a peer actually emits.** `BoundaryRecordRescueTests`' records were hand-written against `fields` and every one of them carried per-field `meta`, so the suite agreed with the decoder about a shape no peer sends and could not see either break. Two tests added at the frame layer: a peer record with no per-field `meta` is rescued, and a pre-v1.1 `fields` record is refused rather than partially read.
+
 ## 0.3.89
 
 ### Added
