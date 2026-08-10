@@ -80,7 +80,7 @@ final class BoundaryRecordRescueTests: XCTestCase {
         let flat = """
         {"type":"cmb","source":"peer-a",
          "cmb":{"key":"cmb-abc123","categories":{"focus":{"text":"flat record","vector":[]}},
-                "source":"peer-a","createdBy":"peer-a","createdAt":1785700000000,
+                "source":"peer-a","createdBy":"peer-a","createdTimestamp":1785700000000,
                 "originTimestamp":1785700000000,"storedAt":1785700000000,"confidence":0.8}}
         """
         let parsed = SymFrameParser().feed(wireFrame(flat))
@@ -162,6 +162,22 @@ final class BoundaryRecordRescueTests: XCTestCase {
         let record = try XCTUnwrap(parsed.first?.cmbV2,
                                    "a record without per-field meta is a record, not a broken frame")
         XCTAssertEqual(record.fields["focus"]?.text, "no per-field meta on this one")
+    }
+
+    /// The flat v1 record's timestamp member is `createdTimestamp`. Under
+    /// `createdAt` this did not refuse — `decodeIfPresent(...) ?? 0` stamped
+    /// every real peer's record epoch, which is a wrong answer rather than a
+    /// missing one.
+    func testFlatRecordReadsCreatedTimestamp() throws {
+        let flat = """
+        {"type":"cmb","source":"peer-a",
+         "cmb":{"key":"cmb-abc123","categories":{"focus":{"text":"flat record","vector":[]}},
+                "source":"peer-a","createdBy":"peer-a","createdTimestamp":1786360296251,
+                "originTimestamp":1786360296251,"storedAt":1786360296251,"confidence":0.8}}
+        """
+        let parsed = SymFrameParser().feed(wireFrame(flat))
+        let cmb = try XCTUnwrap(parsed.first?.cmb)
+        XCTAssertEqual(cmb.createdAt, 1786360296251, "epoch means the member name was never read")
     }
 
     /// A peer still speaking the pre-v1.1 container must not be quietly

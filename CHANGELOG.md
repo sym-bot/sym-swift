@@ -2,6 +2,12 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.3.93
+
+### Fixed
+
+- **Flat CMB records now read `createdTimestamp`, the member peers actually send.** Same class as 0.3.92's container rename. `createdAt` is a name no peer has ever emitted — the last occurrence in `@sym-bot/core` 0.9.3 is inside a comment. This one degraded instead of refusing: the decoder's `?? 0` stamped every real peer's record epoch, so records arrived carrying a wrong creation time rather than failing. Bundled `SYMCore.xcframework` → **v0.3.93**.
+
 ## 0.3.92
 
 ### Fixed
