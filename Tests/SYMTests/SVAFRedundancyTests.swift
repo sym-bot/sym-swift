@@ -16,7 +16,7 @@
 //  This formula collapses identical and orthogonal anchors to the same
 //  drift value (≈ 0 in both cases), so redundancy cannot be detected
 //  from the drift output. Instead, the pre-filter runs a similarity-
-//  based check over incoming-vs-anchor field vectors BEFORE fusion.
+//  based check over incoming-vs-anchor category vectors BEFORE fusion.
 //
 //  ## What this file tests
 //
@@ -39,9 +39,9 @@ final class SVAFRedundancyTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    /// Deterministic l2-normalized vector of canonical field dimension.
+    /// Deterministic l2-normalized vector of canonical category dimension.
     private func baseVector(seed: Float = 0.1) -> [Float] {
-        let dim = CMBEncoder.fieldDim
+        let dim = CMBEncoder.categoryDim
         var v = [Float](repeating: seed, count: dim)
         for i in 0..<dim {
             v[i] = seed + Float(i % 7) * 0.01
@@ -70,21 +70,21 @@ final class SVAFRedundancyTests: XCTestCase {
         return CMBEncoder.l2Normalize(v)
     }
 
-    /// Build a CMB with the given vector in every CAT7 field.
+    /// Build a CMB with the given vector in every CAT7 category.
     private func makeCMB(vector: [Float], source: String) -> CognitiveMemoryBlock {
-        var fields: [CMBField: CMBFieldVector] = [:]
-        for field in CMBField.allCases {
-            let v: Float? = (field == .mood) ? 0.0 : nil
-            let a: Float? = (field == .mood) ? 0.0 : nil
-            fields[field] = CMBFieldVector(
-                text: "test-\(field.rawValue)",
+        var categories: [CMBCategory: CMBCategoryVector] = [:]
+        for category in CMBCategory.allCases {
+            let v: Float? = (category == .mood) ? 0.0 : nil
+            let a: Float? = (category == .mood) ? 0.0 : nil
+            categories[category] = CMBCategoryVector(
+                text: "test-\(category.rawValue)",
                 vector: vector,
                 valence: v,
                 arousal: a
             )
         }
         return CMBEncoder.createCMB(
-            fields: fields,
+            categories: categories,
             source: source,
             originTimestamp: UInt64(Date().timeIntervalSince1970 * 1000),
             confidence: 0.9,
@@ -92,29 +92,29 @@ final class SVAFRedundancyTests: XCTestCase {
         )
     }
 
-    /// Build a CMB where `field` uses `mismatchVector` and all other
-    /// fields use `baseVector`. Lets tests exercise the per-field ALL-
+    /// Build a CMB where `category` uses `mismatchVector` and all other
+    /// categories use `baseVector`. Lets tests exercise the per-category ALL-
     /// or-nothing semantics of the redundancy check.
     private func makeCMB(
         baseVector: [Float],
-        mismatchField: CMBField,
+        mismatchCategory: CMBCategory,
         mismatchVector: [Float],
         source: String
     ) -> CognitiveMemoryBlock {
-        var fields: [CMBField: CMBFieldVector] = [:]
-        for field in CMBField.allCases {
-            let v: Float? = (field == .mood) ? 0.0 : nil
-            let a: Float? = (field == .mood) ? 0.0 : nil
-            let vector = (field == mismatchField) ? mismatchVector : baseVector
-            fields[field] = CMBFieldVector(
-                text: "test-\(field.rawValue)",
+        var categories: [CMBCategory: CMBCategoryVector] = [:]
+        for category in CMBCategory.allCases {
+            let v: Float? = (category == .mood) ? 0.0 : nil
+            let a: Float? = (category == .mood) ? 0.0 : nil
+            let vector = (category == mismatchCategory) ? mismatchVector : baseVector
+            categories[category] = CMBCategoryVector(
+                text: "test-\(category.rawValue)",
                 vector: vector,
                 valence: v,
                 arousal: a
             )
         }
         return CMBEncoder.createCMB(
-            fields: fields,
+            categories: categories,
             source: source,
             originTimestamp: UInt64(Date().timeIntervalSince1970 * 1000),
             confidence: 0.9,
@@ -219,23 +219,23 @@ final class SVAFRedundancyTests: XCTestCase {
         )
     }
 
-    // MARK: - Per-field all-or-nothing semantics
+    // MARK: - Per-category all-or-nothing semantics
 
-    /// A single novel field must save the CMB from the redundancy
-    /// classification — the check is AND over all fields, not OR.
+    /// A single novel category must save the CMB from the redundancy
+    /// classification — the check is AND over all categories, not OR.
     /// This protects against losing a CMB that happens to share six
-    /// out of seven fields with an existing anchor but carries a
+    /// out of seven categories with an existing anchor but carries a
     /// genuinely new signal in the seventh.
-    func testSingleNovelFieldBlocksRedundancy() {
+    func testSingleNovelCategoryBlocksRedundancy() {
         let node = SymNode(name: "test-single-novel", svafRedundancyCheckEnabled: true)
         defer { node.stop() }
         let base = baseVector()
         let orth = orthogonal(base)
         let anchor = makeCMB(vector: base, source: "anchor")
-        // All 7 fields use base EXCEPT `mood` which is orthogonal.
+        // All 7 categories use base EXCEPT `mood` which is orthogonal.
         let incoming = makeCMB(
             baseVector: base,
-            mismatchField: .mood,
+            mismatchCategory: .mood,
             mismatchVector: orth,
             source: "incoming-novel-mood"
         )
@@ -261,7 +261,7 @@ final class SVAFRedundancyTests: XCTestCase {
     }
 
     /// Multiple anchors: if ANY single anchor covers the incoming
-    /// on all fields, the CMB is redundant. Other unrelated anchors
+    /// on all categories, the CMB is redundant. Other unrelated anchors
     /// in the set must not block the classification.
     func testRedundancyAgainstAnyAnchorInSet() {
         let node = SymNode(name: "test-multi-anchor", svafRedundancyCheckEnabled: true)

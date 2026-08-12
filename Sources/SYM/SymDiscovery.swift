@@ -114,11 +114,11 @@ final class SymDiscovery {
             // it unique per (node, service type). Peers identify the node via the
             // `node-id` TXT entry, and self-filtering is by `node-id` too (see
             // handlePeerFound), so this label change is transparent to interop.
-            let groupToken = serviceType
+            let roomToken = serviceType
                 .replacingOccurrences(of: "._tcp", with: "")
                 .replacingOccurrences(of: ".", with: "")
                 .trimmingCharacters(in: CharacterSet(charactersIn: "_"))
-            let instanceName = groupToken.isEmpty ? identity.nodeId : "\(identity.nodeId)-\(groupToken)"
+            let instanceName = roomToken.isEmpty ? identity.nodeId : "\(identity.nodeId)-\(roomToken)"
 
             listener.service = NWListener.Service(
                 name: instanceName,

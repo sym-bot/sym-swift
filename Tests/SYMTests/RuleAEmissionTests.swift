@@ -20,47 +20,47 @@ final class RuleAEmissionTests: XCTestCase {
         SymNode(name: "rule-a-test-\(UUID().uuidString.prefix(8))")
     }
 
-    private func fields(_ focus: String) -> [String: Any] {
+    private func categories(_ focus: String) -> [String: Any] {
         ["focus": focus, "issue": "none", "intent": "chain", "motivation": "rule-a",
          "commitment": "sequenced", "perspective": "test", "mood": ["text": "calm"]]
     }
 
     func testEmissionsFormAChainOnTheAuthorsOwnHead() throws {
         let node = freshNode()
-        let first = try XCTUnwrap(node.rememberV2(fields: fields("first statement")))
+        let first = try XCTUnwrap(node.rememberV2(categories: categories("first statement")))
         XCTAssertNil(first.record.metadata.lineage, "the first emission is a ROOT — no head yet")
 
-        let second = try XCTUnwrap(node.rememberV2(fields: fields("second statement")))
+        let second = try XCTUnwrap(node.rememberV2(categories: categories("second statement")))
         XCTAssertEqual(second.record.metadata.lineage?.parents, [first.key],
                        "the second emission parents on the first — one continuous line")
 
-        let third = try XCTUnwrap(node.rememberV2(fields: fields("third statement")))
+        let third = try XCTUnwrap(node.rememberV2(categories: categories("third statement")))
         XCTAssertEqual(third.record.metadata.lineage?.parents, [second.key],
                        "…and the third on the second, never a scatter of unrooted blocks")
     }
 
     func testReassertingOwnHeadCollapsesToACitation() throws {
         let node = freshNode()
-        _ = node.rememberV2(fields: fields("first statement"))
-        let minted = try XCTUnwrap(node.rememberV2(fields: fields("second statement")))
+        _ = node.rememberV2(categories: categories("first statement"))
+        let minted = try XCTUnwrap(node.rememberV2(categories: categories("second statement")))
 
         // Same content again: same address as HEAD → cited, not minted.
-        let again = try XCTUnwrap(node.rememberV2(fields: fields("second statement")))
+        let again = try XCTUnwrap(node.rememberV2(categories: categories("second statement")))
         XCTAssertTrue(again.collapsed)
         XCTAssertEqual(again.key, minted.key)
         XCTAssertNil(again.record.metadata.lineage,
                      "a collapsed record must not leave claiming descent from itself (K→K)")
 
         // HEAD did not move: the next novel emission parents on the ORIGINAL.
-        let next = try XCTUnwrap(node.rememberV2(fields: fields("third statement")))
+        let next = try XCTUnwrap(node.rememberV2(categories: categories("third statement")))
         XCTAssertEqual(next.record.metadata.lineage?.parents, [minted.key],
                        "a collapse never advances HEAD — nothing was minted")
     }
 
     func testTheChainIsSignedAndUnforgeable() throws {
         let node = freshNode()
-        _ = node.rememberV2(fields: fields("first statement"))
-        let second = try XCTUnwrap(node.rememberV2(fields: fields("second statement")))
+        _ = node.rememberV2(categories: categories("first statement"))
+        let second = try XCTUnwrap(node.rememberV2(categories: categories("second statement")))
 
         let pubKey = node.signingPublicKey
         let verdict = CMBSigningV2.verify(second.record, publicKeyB64url: pubKey)
@@ -77,19 +77,19 @@ final class RuleAEmissionTests: XCTestCase {
     func testHeadSurvivesARestart() throws {
         let name = "rule-a-restart-\(UUID().uuidString.prefix(8))"
         let first = SymNode(name: name)
-        let last = try XCTUnwrap(first.rememberV2(fields: fields("before the restart")))
+        let last = try XCTUnwrap(first.rememberV2(categories: categories("before the restart")))
 
         // Same identity, new process-lifetime: the chain continues, it does
         // not restart as a scatter of new roots.
         let second = SymNode(name: name)
-        let resumed = try XCTUnwrap(second.rememberV2(fields: fields("after the restart")))
+        let resumed = try XCTUnwrap(second.rememberV2(categories: categories("after the restart")))
         XCTAssertEqual(resumed.record.metadata.lineage?.parents, [last.key],
                        "HEAD persists across restarts — the control plane sees one line, not a gap")
     }
 
     func testEmittedFrameRoundTripsTheWire() throws {
         let node = freshNode()
-        let emission = try XCTUnwrap(node.rememberV2(fields: fields("over the wire")))
+        let emission = try XCTUnwrap(node.rememberV2(categories: categories("over the wire")))
 
         var frame = SymFrame(type: .cmb)
         frame.source = node.name

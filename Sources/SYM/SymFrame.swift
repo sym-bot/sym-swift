@@ -180,7 +180,7 @@ public struct SymFrame: Codable, Sendable {
     /// CfC hidden state vector 1. **DEPRECATED in MMP v0.2.2.**
     /// Hidden states never cross the wire under SVAF (Xu, 2026, §3.4).
     /// Retained on the type for backward-compatible decoding only; senders
-    /// MUST NOT populate this field.
+    /// MUST NOT populate this category.
     public var h1: [Float]?
     /// CfC hidden state vector 2. **DEPRECATED in MMP v0.2.2.** See ``h1``.
     public var h2: [Float]?
@@ -227,9 +227,18 @@ public struct SymFrame: Codable, Sendable {
     /// for a cmb frame.
     public var cmbV2: CMBRecordV2? = nil
 
-    /// Encrypted CMB fields (base64 ciphertext with appended auth tag).
-    /// When present, `cmb.fields` is empty and must be decrypted using `_e2e.nonce`.
-    public var encryptedFields: String?
+    /// Encrypted CMB categories (base64 ciphertext with appended auth tag).
+    /// When present, `cmb.categories` is empty and must be decrypted using `_e2e.nonce`.
+    ///
+    /// KNOWN DIVERGENCE from @sym-bot/core, on the record (2026-08-12): the canonical
+    /// e2e shape encrypts IN PLACE — `cmb.categories` becomes the ciphertext string and
+    /// `_e2e` rides INSIDE the cmb — and the canonical never emits this top-level member.
+    /// Today the divergence is LATENT: the JS side announces no e2ePublicKey, so a
+    /// Swift↔JS pair never derives a secret and always falls back to plaintext. The
+    /// moment that changes, Swift e2e frames are silently dropped by JS peers. Aligning
+    /// this shape is a protocol change owned by the wire review, deliberately NOT folded
+    /// into the vocabulary rename.
+    public var encryptedCategories: String?
     /// E2E encryption metadata for encrypted CMB frames.
     /// Wire format: `_e2e: { nonce: "base64..." }`.
     public var e2e: E2EMetadata?
@@ -245,7 +254,11 @@ public struct SymFrame: Codable, Sendable {
         case key, content, source, tags, originTimestamp, storedAt, timestamp
         case mood, context
         case from, fromName
-        case cmb, encryptedFields
+        case cmb
+        // FROZEN Swift↔Swift wire key: every 0.3.x peer sends and reads
+        // `encryptedFields`; the identifier follows the 0.4.0 vocabulary,
+        // the byte does not move.
+        case encryptedCategories = "encryptedFields"
         case e2e = "_e2e"
         case isAnchor = "_anchor"
         case trajectory, patterns, anomaly, outcome, coherence
@@ -289,7 +302,7 @@ public struct SymFrame: Codable, Sendable {
     /// Store tally payload (node-stats). See ``SymNodeStats``.
     public var stats: SymNodeStats?
 
-    /// Create a frame with the given type. All other fields default to nil.
+    /// Create a frame with the given type. All other categories default to nil.
     /// - Parameter type: The ``SymFrameType`` for this frame.
     public init(type: SymFrameType) {
         self.type = type
@@ -320,7 +333,7 @@ public struct SymFrame: Codable, Sendable {
     }
 
     /// **DEPRECATED in MMP v0.2.2.** Hidden states never cross the wire under
-    /// SVAF (Xu, 2026, §3.4). Construct CMBs via ``SymNode/remember(fields:tags:parents:originTimestamp:)``
+    /// SVAF (Xu, 2026, §3.4). Construct CMBs via ``SymNode/remember(categories:tags:parents:originTimestamp:)``
     /// and let the node broadcast them on the ``cmb`` channel; cognitive
     /// coupling is performed at Layer 4 over CMBs, not over hidden states.
     @available(*, deprecated, message: "MMP v0.2.2: hidden states do not cross the wire. Use SymNode.remember() to broadcast CMBs.")

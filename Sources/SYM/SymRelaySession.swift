@@ -44,15 +44,15 @@ private struct RelayEnvelope: Codable {
     var fromName: String?
     var payload: AnyCodable?
 
-    // relay-auth fields
+    // relay-auth categories
     var nodeId: String?
     var name: String?
     var token: String?
 
-    // relay-peers fields
+    // relay-peers categories
     var peers: [RelayPeerEntry]?
 
-    // relay-error fields
+    // relay-error categories
     var message: String?
 }
 

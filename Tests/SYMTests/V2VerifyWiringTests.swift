@@ -27,7 +27,7 @@ final class V2VerifyWiringTests: XCTestCase {
 
     private func signedRecord(focus: String) throws -> CMBRecordV2 {
         let record = try CMBRecordV2.create(
-            fields: ["focus": focus, "issue": "none", "intent": "wire",
+            categories: ["focus": focus, "issue": "none", "intent": "wire",
                      "motivation": "guard", "commitment": "exact", "perspective": "test",
                      "mood": ["text": "calm"]],
             createdBy: "vector-author@conformance",
@@ -78,7 +78,7 @@ final class V2VerifyWiringTests: XCTestCase {
 
     func testTamperedV2RecordIsRejectedByTheNodeItself() throws {
         var tampered = try signedRecord(focus: "original statement")
-        tampered.fields["focus"]?.text = "tampered in flight"
+        tampered.categories["focus"]?.text = "tampered in flight"
 
         let outcome = drive(tampered)
         XCTAssertFalse(outcome.rejectedReasons.isEmpty,
