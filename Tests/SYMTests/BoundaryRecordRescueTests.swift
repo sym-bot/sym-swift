@@ -18,7 +18,7 @@ import XCTest
 final class BoundaryRecordRescueTests: XCTestCase {
 
     /// A realistic v2 frame as a current JS node emits it: two-section cmb,
-    /// per-field meta, signature in metadata — length-prefixed like the wire.
+    /// per-category meta, signature in metadata — length-prefixed like the wire.
     private func wireFrame(_ json: String) -> Data {
         let body = Data(json.utf8)
         var length = UInt32(body.count).bigEndian
@@ -60,8 +60,8 @@ final class BoundaryRecordRescueTests: XCTestCase {
         XCTAssertEqual(v2?.metadata.key, "cmb-3123b3beb07c86c10bd02c907ece0ab81bfa9a292a97245136c5ce7a16747e34")
         XCTAssertEqual(v2?.metadata.createdBy, "claude-sym-research@sym-bot-team",
                        "identity comes from the record's own metadata, never the delivering peer")
-        XCTAssertEqual(v2?.fields["focus"]?.text, "boundary record reaches iOS")
-        XCTAssertEqual(v2?.fields["mood"]?.valence, 0.2)
+        XCTAssertEqual(v2?.categories["focus"]?.text, "boundary record reaches iOS")
+        XCTAssertEqual(v2?.categories["mood"]?.valence, 0.2)
         XCTAssertEqual(v2?.metadata.lineage?.parents.count, 1)
         XCTAssertEqual(v2?.metadata.sigAlg, "ed25519",
                        "the signature is carried for the SYMCore-v2 verifier; the bridge deliberately does not feed it to the v1 verifier")
@@ -108,7 +108,7 @@ final class BoundaryRecordRescueTests: XCTestCase {
         let pubB64 = "IVL40Zt5HSRFMkLhXy6rbLfP-ntqXtMAl5YOBpiB2xI"
 
         let record = try CMBRecordV2.create(
-            fields: ["focus": "verified end to end", "issue": "none", "intent": "prove",
+            categories: ["focus": "verified end to end", "issue": "none", "intent": "prove",
                      "motivation": "interop", "commitment": "exact bytes",
                      "perspective": "test", "mood": ["text": "calm"]],
             createdBy: "vector-author@conformance",
@@ -123,10 +123,10 @@ final class BoundaryRecordRescueTests: XCTestCase {
         let verdict = CMBSigningV2.verify(arrived, publicKeyB64url: pubB64)
         XCTAssertTrue(verdict.valid, "signed on one side of the wire, verified on the other: \(verdict.error ?? "")")
 
-        // And a tampered field fails as content-mismatch — integrity is
+        // And a tampered category fails as content-mismatch — integrity is
         // checked on the RECOMPUTED key before the signature is examined.
         var tampered = arrived
-        tampered.fields["focus"]?.text = "tampered in flight"
+        tampered.categories["focus"]?.text = "tampered in flight"
         let bad = CMBSigningV2.verify(tampered, publicKeyB64url: pubB64)
         XCTAssertFalse(bad.valid)
         XCTAssertEqual(bad.error, "content-mismatch")
@@ -145,7 +145,7 @@ final class BoundaryRecordRescueTests: XCTestCase {
 
     // MARK: - The container name, pinned at the layer that dropped the frame
 
-    /// Half of what a live peer emits carries no per-field `meta`: measured
+    /// Half of what a live peer emits carries no per-category `meta`: measured
     /// 471 of 903 records in one node's store. The fixtures above all carry it,
     /// so none of them could see this — the record arrived and the rescue
     /// returned nil, indistinguishable from a quiet mesh.
@@ -161,7 +161,7 @@ final class BoundaryRecordRescueTests: XCTestCase {
         let parsed = SymFrameParser().feed(wireFrame(noMeta))
         let record = try XCTUnwrap(parsed.first?.cmbV2,
                                    "a record without per-field meta is a record, not a broken frame")
-        XCTAssertEqual(record.fields["focus"]?.text, "no per-field meta on this one")
+        XCTAssertEqual(record.categories["focus"]?.text, "no per-field meta on this one")
     }
 
     /// The flat v1 record's timestamp member is `createdTimestamp`. Under

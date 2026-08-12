@@ -196,10 +196,10 @@ public protocol SYMSynthesisDelegate: AnyObject {
 /// let node = SymNode(name: "my-agent")
 /// try await node.start()
 ///
-/// node.remember(fields: [
-///     .focus: CMBEncoder.encodeField("race condition in order processing"),
-///     .issue: CMBEncoder.encodeField("concurrent writes to order state"),
-///     .mood: CMBEncoder.encodeField("concerned"),
+/// node.remember(categories: [
+///     .focus: CMBEncoder.encodeCategory("race condition in order processing"),
+///     .issue: CMBEncoder.encodeCategory("concurrent writes to order state"),
+///     .mood: CMBEncoder.encodeCategory("concerned"),
 /// ])
 /// let results = node.recall("order")
 ///
@@ -234,12 +234,12 @@ public final class SymNode {
     private let svafGuardedThreshold: Float     // ≤ this: guarded; > this: rejected (default 0.5)
     private let svafTemporalLambda: Float       // Weight of temporal drift in combined score (default 0.3)
     private let svafFreshnessSeconds: Float     // τ_freshness for temporal decay (default 1800 = 30min)
-    private let svafFieldWeights: CMBFieldWeights  // Per-field α_f weights
+    private let svafCategoryWeights: CMBCategoryWeights  // Per-category α_f weights
     // SVAF fourth outcome: semantic redundancy (paper §4.5). Fires BEFORE
     // the fusion classifier because SVAF's fusion-based drift formula
     // collapses identical and orthogonal inputs to the same drift value,
     // so redundancy has to be detected via similarity, not drift.
-    private let svafRedundancyThreshold: Float   // Redundant if max per-field cosSim > (1 − this) across all fields
+    private let svafRedundancyThreshold: Float   // Redundant if max per-category cosSim > (1 − this) across all categories
     private let svafRedundancyCheckEnabled: Bool // Feature flag — default off for backward compat
     private let retentionSeconds: TimeInterval    // How long to keep CMBs in local storage (default 86400 = 24h)
     private var purgeTimer: Timer?
@@ -306,9 +306,9 @@ public final class SymNode {
     /// Returns domain-specific insight as a new outbound CMB. SYM shares it back to mesh.
     public weak var synthesisDelegate: SYMSynthesisDelegate?
 
-    /// LLM field extractor for CMB field extraction. See MMP v0.2.0 Section 9.
+    /// LLM category extractor for CMB category extraction. See MMP v0.2.0 Section 9.
     /// App provides LLM implementation; falls back to heuristic keyword extraction if nil.
-    public weak var fieldExtractor: CMBFieldExtractor?
+    public weak var categoryExtractor: CMBCategoryExtractor?
 
     /// Periodic re-encode timer (30s — re-encodes context and broadcasts).
     private var encodeTimer: Timer?
@@ -371,12 +371,12 @@ public final class SymNode {
     ///   - svafGuardedThreshold: SVAF drift ≤ this is "guarded"; above is rejected (default 0.5 = 50% similarity).
     ///   - svafTemporalLambda: Weight of temporal drift in combined score (default 0.3).
     ///   - svafFreshnessSeconds: τ for temporal decay — signals older than this are stale (default 1800 = 30min).
-    ///   - svafFieldWeights: Per-field α_f weights for SVAF evaluation (default: uniform).
+    ///   - svafCategoryWeights: Per-category α_f weights for SVAF evaluation (default: uniform).
     ///   - svafRedundancyThreshold: Paper §4.5 fourth outcome. An incoming CMB is
-    ///     classified as *redundant* when every CAT7 field's vector has cosine
+    ///     classified as *redundant* when every CAT7 category's vector has cosine
     ///     similarity greater than `(1 − svafRedundancyThreshold)` with at least
-    ///     one existing anchor field's vector. Default `0.02` — conservative, meaning
-    ///     inputs must be ≥ 98% similar on every field to be considered redundant.
+    ///     one existing anchor category's vector. Default `0.02` — conservative, meaning
+    ///     inputs must be ≥ 98% similar on every category to be considered redundant.
     ///     Tune per agent based on the observed distribution of near-duplicates in
     ///     the production workload. Has no effect unless
     ///     `svafRedundancyCheckEnabled` is `true`.
@@ -394,7 +394,7 @@ public final class SymNode {
     ///     Pass a read-only CMBStore for audit agents that observe without modifying.
     ///   - stateSyncInterval: **DEPRECATED in MMP v0.2.2.** No-op. Hidden
     ///     states never cross the wire under SVAF (Xu, 2026, §3.4).
-    ///     Cognitive coupling propagates as CMBs via ``remember(fields:tags:parents:originTimestamp:)``;
+    ///     Cognitive coupling propagates as CMBs via ``remember(categories:tags:parents:originTimestamp:)``;
     ///     this parameter is preserved on the API surface only for source
     ///     compatibility with MMP v0.2.0/v0.2.1 clients.
     ///   - relay: WebSocket relay URL for internet-scale mesh (e.g. `wss://sym-relay.onrender.com`).
@@ -413,7 +413,7 @@ public final class SymNode {
         svafGuardedThreshold: Float = 0.5,
         svafTemporalLambda: Float = 0.3,
         svafFreshnessSeconds: Float = 1800,
-        svafFieldWeights: CMBFieldWeights = .uniform,
+        svafCategoryWeights: CMBCategoryWeights = .uniform,
         svafRedundancyThreshold: Float = 0.02,
         svafRedundancyCheckEnabled: Bool = false,
         retentionSeconds: TimeInterval = 86400,
@@ -431,7 +431,7 @@ public final class SymNode {
         self.svafGuardedThreshold = svafGuardedThreshold
         self.svafTemporalLambda = svafTemporalLambda
         self.svafFreshnessSeconds = svafFreshnessSeconds
-        self.svafFieldWeights = svafFieldWeights
+        self.svafCategoryWeights = svafCategoryWeights
         self.svafRedundancyThreshold = svafRedundancyThreshold
         self.svafRedundancyCheckEnabled = svafRedundancyCheckEnabled
         self.retentionSeconds = retentionSeconds
@@ -465,9 +465,9 @@ public final class SymNode {
     internal static let absorbedTag = "sym.absorbed"
 
     /// Classify an incoming CMB as redundant relative to a set of
-    /// anchors. Returns `true` when every CAT7 field's vector has
+    /// anchors. Returns `true` when every CAT7 category's vector has
     /// cosine similarity greater than `(1 − svafRedundancyThreshold)`
-    /// with at least one anchor field's vector. In other words, the
+    /// with at least one anchor category's vector. In other words, the
     /// incoming adds no new information to any of the seven semantic
     /// dimensions the receiver tracks.
     ///
@@ -477,10 +477,10 @@ public final class SymNode {
     /// in to the fourth outcome.
     ///
     /// Design notes:
-    ///   - The check is AND over all fields, not OR. A single novel
-    ///     field saves the CMB from the redundancy classification —
+    ///   - The check is AND over all categories, not OR. A single novel
+    ///     category saves the CMB from the redundancy classification —
     ///     this protects against losing a CMB that shares six out of
-    ///     seven fields with an existing anchor but carries a
+    ///     seven categories with an existing anchor but carries a
     ///     genuinely new signal in the seventh.
     ///   - The check succeeds as long as ANY anchor in the set
     ///     covers the incoming. Unrelated anchors in the set must
@@ -501,17 +501,17 @@ public final class SymNode {
     ) -> Bool {
         guard self.svafRedundancyCheckEnabled, !anchors.isEmpty else { return false }
         let similarityFloor = 1.0 - self.svafRedundancyThreshold
-        for field in CMBField.allCases {
-            guard let incomingField = incoming.fields[field] else { continue }
+        for category in CMBCategory.allCases {
+            guard let incomingCategory = incoming.categories[category] else { continue }
             let bestSim = anchors
-                .compactMap { $0.fields[field]?.vector }
-                .map { CMBEncoder.cosineSimilarity(incomingField.vector, $0) }
+                .compactMap { $0.categories[category]?.vector }
+                .map { CMBEncoder.cosineSimilarity(incomingCategory.vector, $0) }
                 .max() ?? 0
             if bestSim < similarityFloor {
-                return false  // this field is novel → not redundant overall
+                return false  // this category is novel → not redundant overall
             }
         }
-        return true  // all populated fields are near-duplicates of some anchor
+        return true  // all populated categories are near-duplicates of some anchor
     }
 
     // MARK: - Context Encoding
@@ -538,7 +538,7 @@ public final class SymNode {
     /// Periodic re-encoding of the local cognitive state from accumulated
     /// memory. Updates the local CfC's hidden state in-place; **never**
     /// broadcasts it. Cognitive signals propagate to peers only as CMBs via
-    /// ``remember(fields:tags:parents:originTimestamp:)``.
+    /// ``remember(categories:tags:parents:originTimestamp:)``.
     private func reencodeAndBroadcast() {
         let context = buildContext()
         guard context.count > 5 else { return }
@@ -657,20 +657,20 @@ public final class SymNode {
 
     // MARK: - Memory
 
-    /// Store a memory with structured CAT7 fields and broadcast to coupled peers.
+    /// Store a memory with structured CAT7 categories and broadcast to coupled peers.
     /// See MMP v0.2.0 Section 6 (Memory) and Section 14 (Remix).
     ///
-    /// The agent extracts fields — the protocol does not parse raw text.
+    /// The agent extracts categories — the protocol does not parse raw text.
     /// After storing, re-encodes cognitive state and shares with peers based on SVAF coupling decisions.
     ///
     /// - Parameters:
-    ///   - fields: CAT7 field vectors (agent extracts these via ``CMBEncoder``).
+    ///   - categories: CAT7 category vectors (agent extracts these via ``CMBEncoder``).
     ///   - tags: Optional tags for search/filtering.
     ///   - parents: Parent CMBs this is a remix of. Lineage is computed automatically per Section 14.
     ///   - originTimestamp: When the event happened (epoch ms). Defaults to now.
     /// - Returns: The stored ``SymMemoryEntry``.
     @discardableResult
-    public func remember(fields: [CMBField: CMBFieldVector], tags: [String] = [], parents: [CognitiveMemoryBlock] = [], originTimestamp: UInt64? = nil) -> SymMemoryEntry? {
+    public func remember(categories: [CMBCategory: CMBCategoryVector], tags: [String] = [], parents: [CognitiveMemoryBlock] = [], originTimestamp: UInt64? = nil) -> SymMemoryEntry? {
         let ts = originTimestamp ?? UInt64(Date().timeIntervalSince1970 * 1000)
 
         // MMP Section 14.7: enforce remix requires new domain data.
@@ -690,7 +690,7 @@ public final class SymNode {
             method: "SVAF-v2"
         )
 
-        var cmb = CMBEncoder.createCMB(fields: fields, source: name, originTimestamp: ts, lineage: lineage)
+        var cmb = CMBEncoder.createCMB(categories: categories, source: name, originTimestamp: ts, lineage: lineage)
         // MMP §8.3: sign with our Ed25519 identity key so peers can verify
         // authenticity. Unsigned only if the identity has no private key.
         if let privateKey = identity.privateKey {
@@ -739,18 +739,18 @@ public final class SymNode {
                 continue
             }
 
-            // Encrypt fields per-peer if shared secret exists
+            // Encrypt categories per-peer if shared secret exists
             if let sharedSecret = currentSecrets[peerId],
-               let fields = entry.cmb?.fields,
-               let encrypted = E2ECrypto.encryptFields(fields, sharedSecret: sharedSecret) {
-                // Build encrypted frame: fields replaced with ciphertext, _e2e metadata added
+               let categories = entry.cmb?.categories,
+               let encrypted = E2ECrypto.encryptCategories(categories, sharedSecret: sharedSecret) {
+                // Build encrypted frame: categories replaced with ciphertext, _e2e metadata added
                 var encFrame = baseFrame
-                encFrame.encryptedFields = encrypted.ciphertext
+                encFrame.encryptedCategories = encrypted.ciphertext
                 encFrame.e2e = E2EMetadata(nonce: encrypted.nonce)
                 // Clear the plaintext CMB from the encrypted frame — key/createdBy/createdAt/lineage stay on the outer frame
                 encFrame.cmb = nil
                 sendToPeer(nodeId: peerId, frame: encFrame)
-                logger.info("[SYM] e2e: encrypted CMB fields for \(peer.name)")
+                logger.info("[SYM] e2e: encrypted CMB categories for \(peer.name)")
             } else {
                 // Plaintext fallback for peers without E2E
                 sendToPeer(nodeId: peerId, frame: baseFrame)
@@ -768,7 +768,7 @@ public final class SymNode {
 
     /// Relay an already-created CMB to this node's peers WITHOUT storing it or minting a
     /// new key. Lets ONE logical emission propagate across multiple meshes (one SymNode per
-    /// group) as a SINGLE CMB: call `remember()` once on the primary node, then `relay(cmb)`
+    /// room) as a SINGLE CMB: call `remember()` once on the primary node, then `relay(cmb)`
     /// on the others — instead of re-`remember`-ing per node, which mints a fresh key each
     /// time and double-counts a shared store (emitted N×, an observer on one mesh sees 1/N).
     public func relay(_ cmb: CognitiveMemoryBlock) {
@@ -787,9 +787,9 @@ public final class SymNode {
 
         for (peerId, _) in currentPeers {
             if let sharedSecret = currentSecrets[peerId],
-               let encrypted = E2ECrypto.encryptFields(cmb.fields, sharedSecret: sharedSecret) {
+               let encrypted = E2ECrypto.encryptCategories(cmb.categories, sharedSecret: sharedSecret) {
                 var encFrame = baseFrame
-                encFrame.encryptedFields = encrypted.ciphertext
+                encFrame.encryptedCategories = encrypted.ciphertext
                 encFrame.e2e = E2EMetadata(nonce: encrypted.nonce)
                 encFrame.cmb = nil
                 sendToPeer(nodeId: peerId, frame: encFrame)
@@ -813,12 +813,12 @@ public final class SymNode {
     /// **DEPRECATED in MMP v0.2.2.** No-op. Hidden states never cross the
     /// wire under SVAF (Xu, 2026, *Symbolic-Vector Attention Fusion for
     /// Collective Intelligence*, arXiv:2604.03955, §3.4). Cognitive signals
-    /// propagate as CMBs via ``remember(fields:tags:parents:originTimestamp:)``;
-    /// the receiver evaluates them per-field at SVAF Layer 4 and the local
-    /// CfC at Layer 6 integrates the fused fields. The `state-sync` frame
+    /// propagate as CMBs via ``remember(categories:tags:parents:originTimestamp:)``;
+    /// the receiver evaluates them per-category at SVAF Layer 4 and the local
+    /// CfC at Layer 6 integrates the fused categories. The `state-sync` frame
     /// type is preserved on the wire only so that v0.2.0 peers do not break
     /// the parser.
-    @available(*, deprecated, message: "MMP v0.2.2: hidden states do not cross the wire. Call remember(fields:) to broadcast a CMB.")
+    @available(*, deprecated, message: "MMP v0.2.2: hidden states do not cross the wire. Call remember(categories:) to broadcast a CMB.")
     public func broadcastCurrentState() {
         // Intentionally a no-op. See doc comment.
     }
@@ -873,7 +873,7 @@ public final class SymNode {
     /// fleet census clears — a pre-boundary iOS peer cannot read a v2 frame,
     /// and that rollout call is the gate-keeper's, not this code's.
     @discardableResult
-    public func rememberV2(fields: [String: Any],
+    public func rememberV2(categories: [String: Any],
                            to: String? = nil,
                            extraParents: [String] = []) -> V2Emission? {
         loadV2HeadIfNeeded()
@@ -885,8 +885,8 @@ public final class SymNode {
         let lineage = parents.isEmpty ? nil : CMBLineageV2(parents: parents, method: "SVAF-v2")
 
         guard var record = try? CMBRecordV2.create(
-            fields: fields, createdBy: name, lineage: lineage, to: to) else {
-            logger.error("[SYM] rememberV2: record creation failed (missing fields or author)")
+            categories: categories, createdBy: name, lineage: lineage, to: to) else {
+            logger.error("[SYM] rememberV2: record creation failed (missing categories or author)")
             return nil
         }
 
@@ -915,22 +915,22 @@ public final class SymNode {
         // Store the receiver-local flat projection so this node's own SVAF
         // anchors and recall see its emissions (vectors receiver-local, per
         // §7.1 — same posture as the receive bridge).
-        var flatFields: [CMBField: CMBFieldVector] = [:]
-        for (fieldName, field) in record.fields {
-            guard let cat7 = CMBField(rawValue: fieldName) else { continue }
-            flatFields[cat7] = CMBEncoder.encodeField(field.text,
-                                                      valence: field.valence.map { Float($0) },
-                                                      arousal: field.arousal.map { Float($0) })
+        var flatCategories: [CMBCategory: CMBCategoryVector] = [:]
+        for (categoryName, category) in record.categories {
+            guard let cat7 = CMBCategory(rawValue: categoryName) else { continue }
+            flatCategories[cat7] = CMBEncoder.encodeCategory(category.text,
+                                                      valence: category.valence.map { Float($0) },
+                                                      arousal: category.arousal.map { Float($0) })
         }
         let now = UInt64(Date().timeIntervalSince1970 * 1000)
         let flat = CognitiveMemoryBlock(
-            key: record.metadata.key, fields: flatFields, source: name, createdBy: name,
+            key: record.metadata.key, categories: flatCategories, source: name, createdBy: name,
             createdAt: record.metadata.createdTimestamp,
             lineage: record.metadata.lineage.map { CMBLineage(parents: $0.parents) },
             originTimestamp: record.metadata.createdTimestamp, storedAt: now, confidence: 0.9)
         let entry = SymMemoryEntry(
             key: record.metadata.key,
-            content: flatFields.map { "\($0.key.rawValue): \($0.value.text)" }.sorted().joined(separator: "; "),
+            content: flatCategories.map { "\($0.key.rawValue): \($0.value.text)" }.sorted().joined(separator: "; "),
             source: name, tags: [], originTimestamp: record.metadata.createdTimestamp,
             storedAt: now, cmb: flat)
         _ = store.write(entry: entry)
@@ -955,7 +955,7 @@ public final class SymNode {
     ///
     /// Receiving agents evaluate this against their cognitive state and autonomously
     /// decide whether to act. Mood crosses domain boundaries — even rejected CMBs
-    /// deliver their mood field.
+    /// deliver their mood category.
     /// - Parameters:
     ///   - mood: Mood label (e.g. "tired", "focused", "stressed").
     ///   - context: Optional context string describing the mood trigger.
@@ -1458,25 +1458,25 @@ public final class SymNode {
             break
 
         case .cmb:
-            // Detect encrypted CMB: encryptedFields present with _e2e nonce
+            // Detect encrypted CMB: encryptedCategories present with _e2e nonce
             var incomingCMB: CognitiveMemoryBlock
-            if let encryptedFields = frame.encryptedFields,
+            if let encryptedCategories = frame.encryptedCategories,
                let e2eMeta = frame.e2e {
-                // Decrypt fields using peer's shared secret
+                // Decrypt categories using peer's shared secret
                 let sharedSecret: SymmetricKey? = peerQueue.sync { self.peerSharedSecrets[nodeId] }
                 guard let sharedSecret else {
                     logger.warning("[SYM] e2e: received encrypted CMB from \(peerName) but no shared secret — skipping")
                     break
                 }
-                guard let decryptedFields = E2ECrypto.decryptFields(
-                    ciphertext: encryptedFields,
+                guard let decryptedCategories = E2ECrypto.decryptCategories(
+                    ciphertext: encryptedCategories,
                     nonce: e2eMeta.nonce,
                     sharedSecret: sharedSecret
                 ) else {
-                    logger.error("[SYM] e2e: failed to decrypt CMB fields from \(peerName)")
+                    logger.error("[SYM] e2e: failed to decrypt CMB categories from \(peerName)")
                     break
                 }
-                logger.info("[SYM] e2e: decrypted \(decryptedFields.count) CMB fields from \(peerName)")
+                logger.info("[SYM] e2e: decrypted \(decryptedCategories.count) CMB categories from \(peerName)")
 
                 // FAIL CLOSED on identity — never fabricate it. This used to
                 // fall back to an invented `cmb-<UUID8>` key and to the
@@ -1496,10 +1496,10 @@ public final class SymNode {
                     break
                 }
 
-                // Reconstruct CMB with decrypted fields
+                // Reconstruct CMB with decrypted categories
                 incomingCMB = CognitiveMemoryBlock(
                     key: frameKey,
-                    fields: decryptedFields,
+                    categories: decryptedCategories,
                     source: author,
                     createdBy: author,
                     originTimestamp: frame.originTimestamp ?? frame.timestamp ?? UInt64(Date().timeIntervalSince1970 * 1000),
@@ -1521,7 +1521,7 @@ public final class SymNode {
                 // flat path below: present-but-invalid → rejected outright;
                 // unsigned or no-known-key → unverified, not rejected. Note
                 // content integrity is checked INSIDE verify (recomputed
-                // block key) — a tampered field fails as content-mismatch
+                // block key) — a tampered category fails as content-mismatch
                 // even before the signature is examined.
                 let v2SigningKey: String? = peerQueue.sync { self.peerSigningKeys[nodeId] }
                 let v2Verdict = CMBSigningV2.verify(v2, publicKeyB64url: v2SigningKey)
@@ -1531,25 +1531,25 @@ public final class SymNode {
                     break
                 }
 
-                var fields: [CMBField: CMBFieldVector] = [:]
-                for (name, field) in v2.fields {
-                    guard let cat7 = CMBField(rawValue: name) else { continue }
+                var categories: [CMBCategory: CMBCategoryVector] = [:]
+                for (name, category) in v2.categories {
+                    guard let cat7 = CMBCategory(rawValue: name) else { continue }
                     // RECEIVER-LOCAL ENCODING (§7.1, store-none): a v2 record
                     // carries no vectors — deliberately, so nothing a relay
                     // could tamper with reaches drift computation. This node
-                    // encodes from the field's own text, with its own kernel,
-                    // at receive time. Without this the bridged fields carried
-                    // empty vectors and SVAF scored every field maximally
+                    // encodes from the category's own text, with its own kernel,
+                    // at receive time. Without this the bridged categories carried
+                    // empty vectors and SVAF scored every category maximally
                     // drifted — intact records were rejected downstream of a
                     // VERIFIED signature (found by the wiring tests).
-                    fields[cat7] = CMBEncoder.encodeField(field.text,
-                                                          valence: field.valence.map { Float($0) },
-                                                          arousal: field.arousal.map { Float($0) })
+                    categories[cat7] = CMBEncoder.encodeCategory(category.text,
+                                                          valence: category.valence.map { Float($0) },
+                                                          arousal: category.arousal.map { Float($0) })
                 }
                 let now = UInt64(Date().timeIntervalSince1970 * 1000)
                 incomingCMB = CognitiveMemoryBlock(
                     key: v2.metadata.key,
-                    fields: fields,
+                    categories: categories,
                     source: v2.metadata.createdBy,
                     createdBy: v2.metadata.createdBy,
                     lineage: (v2.metadata.lineage?.parents).map { CMBLineage(parents: $0, ancestors: [], method: v2.metadata.lineage?.method ?? "v2-bridge") },
@@ -1580,9 +1580,9 @@ public final class SymNode {
                 break
             }
 
-            let fieldCount = incomingCMB.fields.count
-            let moodText = incomingCMB.fields[.mood]?.text ?? "none"
-            logger.info("[SYM] cmb: received CMB \(incomingCMB.key.prefix(20)) from \(peerName) (\(fieldCount) fields, mood: \(moodText))")
+            let categoryCount = incomingCMB.categories.count
+            let moodText = incomingCMB.categories[.mood]?.text ?? "none"
+            logger.info("[SYM] cmb: received CMB \(incomingCMB.key.prefix(20)) from \(peerName) (\(categoryCount) categories, mood: \(moodText))")
 
             // Echo loop prevention (MMP Section 14): if the incoming CMB's
             // lineage parents include a key that exists in our local meshmem,
@@ -1598,9 +1598,9 @@ public final class SymNode {
                 }
             }
 
-            // ── SVAF v2: Per-Field CMB Fusion ──────────────────────
+            // ── SVAF v2: Per-Category CMB Fusion ──────────────────────
             // MMP v0.2.0 Section 9: λ_j = α_f · cos(x_new, x_j) · g(l_j) · exp(-λ(t_now - t_j)) · c_j
-            // Per-field drift evaluation + field-wise weighted fusion → NEW synthesized memory
+            // Per-category drift evaluation + category-wise weighted fusion → NEW synthesized memory
 
             let now = UInt64(Date().timeIntervalSince1970 * 1000)
             let originTs = frame.originTimestamp ?? frame.timestamp ?? now
@@ -1659,85 +1659,85 @@ public final class SymNode {
                 break
             }
 
-            // 2. Per-field drift evaluation and fusion
-            var fieldDrifts: [CMBField: Float] = [:]
-            var fusedFields: [CMBField: CMBFieldVector] = [:]
-            var anchorWeightsLog: [CMBField: [Float]] = [:]
+            // 2. Per-category drift evaluation and fusion
+            var categoryDrifts: [CMBCategory: Float] = [:]
+            var fusedCategories: [CMBCategory: CMBCategoryVector] = [:]
+            var anchorWeightsLog: [CMBCategory: [Float]] = [:]
 
-            for field in CMBField.allCases {
-                guard let incomingField = incomingCMB.fields[field] else { continue }
+            for category in CMBCategory.allCases {
+                guard let incomingCategory = incomingCMB.categories[category] else { continue }
 
-                let alphaF = self.svafFieldWeights[field]
-                var weightedVec = incomingField.vector.map { $0 * 1.0 as Float }  // λ_new = 1.0
+                let alphaF = self.svafCategoryWeights[category]
+                var weightedVec = incomingCategory.vector.map { $0 * 1.0 as Float }  // λ_new = 1.0
                 var totalWeight: Float = 1.0
-                var fieldAnchorWeights: [Float] = []
+                var categoryAnchorWeights: [Float] = []
 
                 for anchor in anchors {
-                    guard let anchorField = anchor.fields[field] else {
-                        fieldAnchorWeights.append(0)
+                    guard let anchorCategory = anchor.categories[category] else {
+                        categoryAnchorWeights.append(0)
                         continue
                     }
 
-                    let cosSim = CMBEncoder.cosineSimilarity(incomingField.vector, anchorField.vector)
+                    let cosSim = CMBEncoder.cosineSimilarity(incomingCategory.vector, anchorCategory.vector)
                     let anchorAge = now >= anchor.storedAt ? Float(now - anchor.storedAt) / 1000.0 : 0.0
                     let anchorDecay = exp(-anchorAge / self.svafFreshnessSeconds)
                     // Section 6.4: validator-origin CMBs have anchor weight 2.0
                     let validatorMultiplier: Float = validatorOriginKeys.contains(anchor.key) ? 2.0 : 1.0
                     let w = alphaF * max(cosSim, 0) * anchorDecay * anchor.confidence * validatorMultiplier
 
-                    let minDim = min(weightedVec.count, anchorField.vector.count)
+                    let minDim = min(weightedVec.count, anchorCategory.vector.count)
                     for d in 0..<minDim {
-                        weightedVec[d] += w * anchorField.vector[d]
+                        weightedVec[d] += w * anchorCategory.vector[d]
                     }
                     totalWeight += w
-                    fieldAnchorWeights.append(w)
+                    categoryAnchorWeights.append(w)
                 }
 
                 // Normalize fused vector
                 var fused = weightedVec.map { $0 / max(totalWeight, 1e-8) }
                 fused = CMBEncoder.l2Normalize(fused)
 
-                // Per-field drift: distance between fused and local (anchors' average)
-                let fieldDrift = 1.0 - CMBEncoder.cosineSimilarity(fused, incomingField.vector)
-                fieldDrifts[field] = fieldDrift
-                anchorWeightsLog[field] = fieldAnchorWeights
+                // Per-category drift: distance between fused and local (anchors' average)
+                let categoryDrift = 1.0 - CMBEncoder.cosineSimilarity(fused, incomingCategory.vector)
+                categoryDrifts[category] = categoryDrift
+                anchorWeightsLog[category] = categoryAnchorWeights
 
-                // Synthesize field text
-                // TODO: v2 — LLM synthesis of field text
-                let fusedText = incomingField.text
-                // MMP §8.2: preserve mood field's valence/arousal structured floats
-                fusedFields[field] = CMBFieldVector(
+                // Synthesize category text
+                // TODO: v2 — LLM synthesis of category text
+                let fusedText = incomingCategory.text
+                // MMP §8.2: preserve mood category's valence/arousal structured floats
+                fusedCategories[category] = CMBCategoryVector(
                     text: fusedText,
                     vector: fused,
-                    valence: incomingField.valence,
-                    arousal: incomingField.arousal
+                    valence: incomingCategory.valence,
+                    arousal: incomingCategory.arousal
                 )
             }
 
-            // 4. Aggregate drift: weighted average of per-field drifts
+            // 4. Aggregate drift: weighted average of per-category drifts
             var weightedDriftSum: Float = 0
             var weightSum: Float = 0
-            for field in CMBField.allCases {
-                let alphaF = self.svafFieldWeights[field]
-                weightedDriftSum += alphaF * (fieldDrifts[field] ?? 0)
+            for category in CMBCategory.allCases {
+                let alphaF = self.svafCategoryWeights[category]
+                weightedDriftSum += alphaF * (categoryDrifts[category] ?? 0)
                 weightSum += alphaF
             }
-            let aggregateFieldDrift = weightSum > 0 ? weightedDriftSum / weightSum : 1.0
+            let aggregateCategoryDrift = weightSum > 0 ? weightedDriftSum / weightSum : 1.0
 
-            // 5. Combined: content-field drift + temporal drift
-            let totalDrift = (1.0 - self.svafTemporalLambda) * aggregateFieldDrift + self.svafTemporalLambda * temporalDrift
+            // 5. Combined: content-category drift + temporal drift
+            let totalDrift = (1.0 - self.svafTemporalLambda) * aggregateCategoryDrift + self.svafTemporalLambda * temporalDrift
 
             // 6. Threshold decision
             if totalDrift > self.svafGuardedThreshold {
-                let fieldLog = fieldDrifts.map { "\($0.key.rawValue):\(String(format: "%.2f", $0.value))" }.joined(separator: " ")
-                logger.info("[SYM] memory: SVAF rejected from \(peerName) — drift \(String(format: "%.3f", totalDrift)) [\(fieldLog)] temporal:\(String(format: "%.2f", temporalDrift))")
+                let categoryLog = categoryDrifts.map { "\($0.key.rawValue):\(String(format: "%.2f", $0.value))" }.joined(separator: " ")
+                logger.info("[SYM] memory: SVAF rejected from \(peerName) — drift \(String(format: "%.3f", totalDrift)) [\(categoryLog)] temporal:\(String(format: "%.2f", temporalDrift))")
 
                 // Mood crosses all domain boundaries (MMP spec).
                 // Even when the full CMB is rejected, mood-aware agents must
-                // still receive the mood field for autonomous processing.
-                if let moodField = incomingCMB.fields[.mood], moodField.text != "neutral" {
-                    logger.info("[SYM] memory: mood extracted from rejected CMB: \"\(moodField.text)\" from \(peerName)")
-                    emit(.memoryReceived(from: peerName, content: moodField.text, decision: "mood-only", cmb: incomingCMB))
+                // still receive the mood category for autonomous processing.
+                if let moodCategory = incomingCMB.categories[.mood], moodCategory.text != "neutral" {
+                    logger.info("[SYM] memory: mood extracted from rejected CMB: \"\(moodCategory.text)\" from \(peerName)")
+                    emit(.memoryReceived(from: peerName, content: moodCategory.text, decision: "mood-only", cmb: incomingCMB))
                 }
                 break
             }
@@ -1751,16 +1751,16 @@ public final class SymNode {
                 ancestors: (incomingCMB.lineage?.ancestors ?? []) + [incomingCMB.key]
             )
             let fusedCMB = CognitiveMemoryBlock(
-                fields: fusedFields,
+                categories: fusedCategories,
                 source: "\(self.name)+\(frame.source ?? peerName)",
                 lineage: fusedLineage,
                 originTimestamp: originTs,
                 storedAt: now,
-                confidence: confidence * (1.0 - aggregateFieldDrift),
+                confidence: confidence * (1.0 - aggregateCategoryDrift),
                 provenance: CMBProvenance(
                     fusedFrom: [incomingCMB.key] + anchors.map(\.key),
                     fusionWeights: anchorWeightsLog,
-                    fieldDrift: fieldDrifts,
+                    categoryDrift: categoryDrifts,
                     totalDrift: totalDrift,
                     temporalDrift: temporalDrift
                 )
@@ -1793,9 +1793,9 @@ public final class SymNode {
             emit(.cmbAccepted(entry: entry, isAnchor: isAnchor, isRemix: isRemix))
             emit(.metric(type: "cmb-accepted", detail: ["from": peerName, "key": entry.key]))
 
-            let fieldLog = fieldDrifts.sorted(by: { $0.key.rawValue < $1.key.rawValue })
+            let categoryLog = categoryDrifts.sorted(by: { $0.key.rawValue < $1.key.rawValue })
                 .map { "\($0.key.rawValue):\(String(format: "%.2f", $0.value))" }.joined(separator: " ")
-            logger.info("[SYM] memory: SVAF fused from \(peerName): \"\(fusedContent.prefix(50))\" [\(decision), drift:\(String(format: "%.3f", totalDrift)), fields: \(fieldLog), age:\(String(format: "%.0f", ageSeconds))s]")
+            logger.info("[SYM] memory: SVAF fused from \(peerName): \"\(fusedContent.prefix(50))\" [\(decision), drift:\(String(format: "%.3f", totalDrift)), categories: \(categoryLog), age:\(String(format: "%.0f", ageSeconds))s]")
             emit(.memoryReceived(from: peerName, content: fusedContent, decision: decision, cmb: fusedCMB))
 
         case .mood:
@@ -1811,7 +1811,7 @@ public final class SymNode {
             // crosses the wire under SVAF (Xu, 2026, §3.4).
             //
             // TODO(MMP v0.3.0): replace this local-synthesis relevance
-            // gate with a synthetic one-field CMB whose `.mood` field
+            // gate with a synthetic one-category CMB whose `.mood` category
             // carries the received text + valence/arousal, and run it
             // through the canonical SVAF Layer-4 evaluator on the same
             // path as `.cmb` frames. The legacy `.mood` frame type
@@ -1861,9 +1861,9 @@ public final class SymNode {
             // 2. Synthesis loop: call delegate, share insight back to mesh
             let insight = XMeshInsight(trajectory: trajectory, patterns: patterns, anomaly: anomaly, outcome: outcome, coherence: coherence)
             if let synthesis = synthesisDelegate?.synthesizeInsight(from: insight) {
-                remember(fields: [
-                    .focus: CMBEncoder.encodeField(synthesis),
-                    .mood: CMBEncoder.encodeField("neutral"),
+                remember(categories: [
+                    .focus: CMBEncoder.encodeCategory(synthesis),
+                    .mood: CMBEncoder.encodeCategory("neutral"),
                 ], tags: ["xmesh-synthesis"])
                 logger.info("[SYM] xmesh: synthesis: shared domain insight back to mesh")
             }

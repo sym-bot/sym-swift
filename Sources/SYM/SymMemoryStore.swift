@@ -185,12 +185,12 @@ final class SymMemoryStore: CMBStore, @unchecked Sendable {
         return entries.compactMap { entry in
             if let cmb = entry.cmb { return cmb }
             // Legacy entries without CMBs: create minimal anchor from content text
-            let fields: [CMBField: CMBFieldVector] = [
-                .focus: CMBEncoder.encodeField(String(entry.content.prefix(80))),
-                .mood: CMBEncoder.encodeField("neutral"),
+            let categories: [CMBCategory: CMBCategoryVector] = [
+                .focus: CMBEncoder.encodeCategory(String(entry.content.prefix(80))),
+                .mood: CMBEncoder.encodeCategory("neutral"),
             ]
             return CMBEncoder.createCMB(
-                fields: fields,
+                categories: categories,
                 source: entry.source,
                 originTimestamp: entry.originTimestamp,
                 confidence: 0.5
