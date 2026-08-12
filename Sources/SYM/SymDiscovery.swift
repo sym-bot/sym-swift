@@ -105,11 +105,11 @@ final class SymDiscovery {
             txtRecord["hostname"] = identity.hostname
 
             // Bonjour instance name must be unique among the services THIS device
-            // advertises. An app that joins cross-app groups runs one SymNode —
-            // hence one listener — per group, all sharing the device's identity.
+            // advertises. An app that joins cross-app rooms runs one SymNode —
+            // hence one listener — per room, all sharing the device's identity.
             // Keying the instance name on nodeId alone makes those co-resident
             // listeners collide, and the Network framework publishes only the
-            // first: the group's `_<group>._tcp` service never reaches the LAN
+            // first: the room's `_<room>._tcp` service never reaches the LAN
             // (the main `_melotune._tcp` node still does, masking the bug). Make
             // it unique per (node, service type). Peers identify the node via the
             // `node-id` TXT entry, and self-filtering is by `node-id` too (see

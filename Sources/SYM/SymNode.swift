@@ -768,7 +768,7 @@ public final class SymNode {
 
     /// Relay an already-created CMB to this node's peers WITHOUT storing it or minting a
     /// new key. Lets ONE logical emission propagate across multiple meshes (one SymNode per
-    /// group) as a SINGLE CMB: call `remember()` once on the primary node, then `relay(cmb)`
+    /// room) as a SINGLE CMB: call `remember()` once on the primary node, then `relay(cmb)`
     /// on the others — instead of re-`remember`-ing per node, which mints a fresh key each
     /// time and double-counts a shared store (emitted N×, an observer on one mesh sees 1/N).
     public func relay(_ cmb: CognitiveMemoryBlock) {
