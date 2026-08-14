@@ -150,6 +150,14 @@ final class SymRelaySession: @unchecked Sendable {
     private let url: URL
     private let identity: SymIdentity
     private let token: String?
+    /// The room PARTITION this session joins inside its token's channel.
+    ///
+    /// The token decides which CHANNEL the relay lets this connection reach — server-held state a
+    /// client cannot influence. The room subdivides that already-authenticated channel, so it is
+    /// safe for the client to name: it can only narrow what this connection receives, never widen
+    /// it. `nil` means the unnamed partition, which is where every pre-room client lives, so
+    /// omitting it behaves exactly as before.
+    private let room: String?
     private let logger = Logger(subsystem: "bot.sym", category: "RelaySession")
 
     /// Serial queue protecting all mutable relay state.
@@ -168,10 +176,11 @@ final class SymRelaySession: @unchecked Sendable {
 
     // MARK: - Init
 
-    init(url: URL, identity: SymIdentity, token: String? = nil) {
+    init(url: URL, identity: SymIdentity, token: String? = nil, room: String? = nil) {
         self.url = url
         self.identity = identity
         self.token = token
+        self.room = room
     }
 
     // MARK: - Lifecycle
@@ -279,6 +288,10 @@ final class SymRelaySession: @unchecked Sendable {
             "name": identity.name,
         ]
         if let token { auth["token"] = token }
+        // Relay ≥ 0.1.3 partitions delivery, roster and departures by this. An older relay ignores
+        // the field, so sending it is safe against both — but on an older relay every room lands in
+        // one channel with no isolation, which is why the deployed build matters.
+        if let room, !room.isEmpty { auth["room"] = room }
 
         guard let data = try? JSONSerialization.data(withJSONObject: auth),
               let text = String(data: data, encoding: .utf8) else { return }

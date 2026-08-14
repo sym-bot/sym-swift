@@ -366,6 +366,16 @@ public final class SymNode {
     // Relay
     private let relayURL: URL?
     private let relayToken: String?
+    /// The room PARTITION this node joins on the relay, inside `relayToken`'s channel.
+    ///
+    /// The token gates WHICH CHANNEL the relay lets this node reach; the room subdivides that
+    /// already-authenticated channel. A client may safely name it because it can only narrow what
+    /// this node receives, never widen it. `nil` is the unnamed partition — the behaviour of every
+    /// build before rooms existed.
+    ///
+    /// Requires a relay running 0.1.3 or newer. An older relay IGNORES the field, which means every
+    /// room silently shares one channel — connected, but not isolated.
+    private let relayRoom: String?
     private let relayOnly: Bool
     private var relaySession: SymRelaySession?
 
@@ -436,7 +446,8 @@ public final class SymNode {
     ///     this parameter is preserved on the API surface only for source
     ///     compatibility with MMP v0.2.0/v0.2.1 clients.
     ///   - relay: WebSocket relay URL for internet-scale mesh (e.g. `wss://sym-relay.onrender.com`).
-    ///   - relayToken: Shared secret for relay authentication.
+    ///   - relayToken: Shared secret for relay authentication — selects the channel.
+    ///   - relayRoom: Optional room partition inside that channel (relay 0.1.3+).
     ///   - relayOnly: If true, skip Bonjour discovery and only use the relay.
     ///   - discoveryServiceType: Bonjour service type for LAN discovery.
     ///     Defaults to `_sym._tcp` (interoperable with Node.js SYM nodes).
@@ -459,6 +470,7 @@ public final class SymNode {
         stateSyncInterval: TimeInterval = 0,
         relay: URL? = nil,
         relayToken: String? = nil,
+        relayRoom: String? = nil,
         relayOnly: Bool = false,
         discoveryServiceType: String = "_sym._tcp"
     ) {
@@ -476,6 +488,7 @@ public final class SymNode {
         self.stateSyncInterval = stateSyncInterval
         self.relayURL = relay
         self.relayToken = relayToken
+        self.relayRoom = relayRoom
         self.relayOnly = relayOnly
         self.identity = SymIdentityManager.loadOrCreate(name: name)
         self.nodeId = identity.nodeId
@@ -606,7 +619,7 @@ public final class SymNode {
         }
 
         if let relayURL {
-            let relay = SymRelaySession(url: relayURL, identity: identity, token: relayToken)
+            let relay = SymRelaySession(url: relayURL, identity: identity, token: relayToken, room: relayRoom)
             relay.delegate = self
             relay.start()
             self.relaySession = relay
@@ -1038,7 +1051,7 @@ public final class SymNode {
         guard _running else { return }
         relaySession?.stop()
         if let url = relayURL {
-            relaySession = SymRelaySession(url: url, identity: identity, token: relayToken)
+            relaySession = SymRelaySession(url: url, identity: identity, token: relayToken, room: relayRoom)
             relaySession?.delegate = self
             relaySession?.start()
             logger.info("[SYM] relay: reconnecting after wake")
