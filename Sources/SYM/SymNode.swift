@@ -332,6 +332,26 @@ public final class SymNode {
     /// handshake. Used to verify the signatures on CMBs they author (MMP §8.3).
     private var peerSigningKeys: [String: String] = [:]
 
+    /// MMP §8.3 rejection stance, in ONE place for both record shapes.
+    ///
+    /// Reject ONLY present-but-invalid — a forged or tampered CMB. `no-public-key` means this
+    /// node cannot verify YET (the author's key has not been learned — e.g. a broadcast arriving
+    /// via a relay roster before any handshake with the author): that is UNVERIFIED, never
+    /// forged, and it must not be rejected — rejecting it made every Swift↔Swift broadcast
+    /// between freshly-met nodes fail as "bad signature", which reads as forgery in the logs
+    /// while actually meaning key-distribution latency. The JS reference and the v2 path here
+    /// already held this stance; the flat path had drifted because the stance lived as two
+    /// copies. Now it is one predicate; both paths call it.
+    private func rejectsSignature(signed: Bool, valid: Bool, error: String?) -> Bool {
+        return signed && !valid && error != "no-public-key"
+    }
+
+    /// Test seam for the stance above — the predicate is the security decision, so it is pinned
+    /// by tests rather than re-derived in them.
+    internal func testHook_rejectsSignature(signed: Bool, valid: Bool, error: String?) -> Bool {
+        rejectsSignature(signed: signed, valid: valid, error: error)
+    }
+
     /// Section 6.4: CMB keys from validator/anchor nodes — anchor weight multiplier 2.0.
     /// Can't add property to CMBStoreEntry (binary framework), so track externally.
     private var validatorOriginKeys: Set<String> = []
@@ -1585,7 +1605,7 @@ public final class SymNode {
                 // even before the signature is examined.
                 let v2SigningKey: String? = peerQueue.sync { self.peerSigningKeys[nodeId] }
                 let v2Verdict = CMBSigningV2.verify(v2, publicKeyB64url: v2SigningKey)
-                if v2Verdict.signed && !v2Verdict.valid && v2Verdict.error != "no-public-key" {
+                if rejectsSignature(signed: v2Verdict.signed, valid: v2Verdict.valid, error: v2Verdict.error) {
                     logger.error("[SYM] cmb: REJECTED v2 \(v2.metadata.key.prefix(20)) from \(peerName) — \(v2Verdict.error ?? "invalid")")
                     emit(.metric(type: "cmb-signature-rejected", detail: ["from": peerName, "key": v2.metadata.key, "reason": v2Verdict.error ?? "invalid"]))
                     break
@@ -1634,7 +1654,7 @@ public final class SymNode {
             // CMBs carry no `sig` (E2E AEAD already authenticates) → unverified.
             let peerSigningKey: String? = peerQueue.sync { self.peerSigningKeys[nodeId] }
             let verdict = CMBSigning.verify(incomingCMB, publicKeyBase64URL: peerSigningKey)
-            if verdict.signed && !verdict.valid {
+            if rejectsSignature(signed: verdict.signed, valid: verdict.valid, error: verdict.error) {
                 logger.error("[SYM] cmb: REJECTED \(incomingCMB.key.prefix(20)) from \(peerName) — bad signature (\(verdict.error ?? "invalid"))")
                 emit(.metric(type: "cmb-signature-rejected", detail: ["from": peerName, "key": incomingCMB.key, "reason": verdict.error ?? "invalid"]))
                 break
