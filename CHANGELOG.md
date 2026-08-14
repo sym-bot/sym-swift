@@ -2,6 +2,20 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.4.1
+
+### Added
+
+- **`SymPeerInfo.reachability` — how a peer is reachable, exposed at last.** The node already tracked it (`PeerState.transports`, keyed by source: `bonjour` for the local network, the relay otherwise); it simply never left the SDK, so an app could not tell a Wi-Fi peer from a relayed one even to LABEL it.
+
+  It is a `Set<SymPeerReachability>`, not a mode, and that is the load-bearing decision: **MMP §4.6 allows a peer to hold multiple transports at once**, so someone on your Wi-Fi who is also relay-connected is genuinely both. The node prefers Bonjour when both exist, but that is a routing choice, not a fact about the peer — a two-state field would have to pick one and misreport the ordinary case. Read from the transports a peer currently holds rather than from how it was first discovered, so a LAN peer that later gains a relay path becomes both, and stays both until a transport closes.
+
+  This exists so an app can show WHERE a peer is reachable from. It does not gate what a peer may do: coupling, presence and harmonizing are identical on either transport.
+
+### Fixed
+
+- **`SymPeerInfo`'s initialiser is now public.** A public struct whose memberwise init was internal could not be constructed by a consumer, so an app could receive one and never build one — leaving every peer-facing view untestable and unpreviewable. Found while writing a consumer's peer-classification tests, which had to be rewritten against a different surface to get around it.
+
 ## 0.3.94
 
 ### Added
