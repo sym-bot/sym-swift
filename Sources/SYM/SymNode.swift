@@ -127,6 +127,24 @@ public struct SymPeerInfo: Sendable {
     /// and harmonizing are identical either way); this exists so an app can
     /// show WHERE a peer is reachable from, not to gate what it may do.
     public let reachability: Set<SymPeerReachability>
+
+    /// PUBLIC because a consumer must be able to build one — for a test, a
+    /// SwiftUI preview, or a fixture. The memberwise init was internal, which
+    /// made this public struct unconstructible outside the package: an app
+    /// could receive a SymPeerInfo and never make one, so peer-facing UI had
+    /// no way to be tested at all. Found while testing MeloTune's peer
+    /// classification.
+    public init(id: String, name: String, connected: Bool, lastSeen: Date,
+                coupling: String, drift: Float?,
+                reachability: Set<SymPeerReachability> = []) {
+        self.id = id
+        self.name = name
+        self.connected = connected
+        self.lastSeen = lastSeen
+        self.coupling = coupling
+        self.drift = drift
+        self.reachability = reachability
+    }
 }
 
 /// The ways a peer can be reachable. Additive: a peer may be several at once.
