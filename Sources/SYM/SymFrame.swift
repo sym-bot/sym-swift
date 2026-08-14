@@ -314,7 +314,11 @@ public struct SymFrame: Codable, Sendable {
         var frame = SymFrame(type: .handshake)
         frame.nodeId = nodeId
         frame.name = name
-        frame.version = "0.2.2"
+        // The legacy handshake label, from the single public constant rather than a literal here.
+        // It was "0.2.2" while the JS reference sent "0.2.3" — a drift nothing detected, because no
+        // receiver validates this field. Aligning it is tidiness, not a compatibility fix; what a
+        // peer actually agrees with is MMP.protocolVersion inside the signed §5.2 transcript.
+        frame.version = MMP.legacyHandshakeRevision
         frame.extensions = []
         frame.publicKey = publicKey
         frame.e2ePublicKey = e2ePublicKey
