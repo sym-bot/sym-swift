@@ -115,6 +115,26 @@ public struct SymPeerInfo: Sendable {
     public let coupling: String
     /// SVAF drift score (0 = identical, 1 = maximally divergent), or nil if not yet evaluated.
     public let drift: Float?
+    /// How this peer is currently reachable.
+    ///
+    /// MMP §4.6: a peer MAY hold MULTIPLE transports at once, so this is a
+    /// SET, not a mode. Someone on your Wi-Fi who is also relay-connected is
+    /// genuinely both, and a two-state field would have to pick one and
+    /// misreport the other — the node itself prefers Bonjour when both
+    /// exist, but that is a routing choice, not a fact about the peer.
+    ///
+    /// The mesh EXPERIENCE does not vary by transport (coupling, presence
+    /// and harmonizing are identical either way); this exists so an app can
+    /// show WHERE a peer is reachable from, not to gate what it may do.
+    public let reachability: Set<SymPeerReachability>
+}
+
+/// The ways a peer can be reachable. Additive: a peer may be several at once.
+public enum SymPeerReachability: String, Sendable, Hashable, CaseIterable {
+    /// Discovered and connected on the local network (Bonjour).
+    case localNetwork
+    /// Connected through the relay, from anywhere.
+    case relay
 }
 
 // MARK: - Node Status
@@ -1033,13 +1053,22 @@ public final class SymNode {
 
         return currentPeers.map { (id, peer) in
             let d = decisions[id]
+            // Read from the transports the peer actually holds, rather
+            // than from how it was first discovered: a peer that gained a
+            // relay path after joining on LAN is both, and stays both until
+            // a transport closes.
+            var reachability: Set<SymPeerReachability> = []
+            for source in peer.transports.keys {
+                reachability.insert(source == "bonjour" ? .localNetwork : .relay)
+            }
             return SymPeerInfo(
                 id: id,
                 name: peer.name,
                 connected: true,
                 lastSeen: peer.lastSeen,
                 coupling: d?.decision.rawValue ?? "pending",
-                drift: d?.drift
+                drift: d?.drift,
+                reachability: reachability
             )
         }
     }
