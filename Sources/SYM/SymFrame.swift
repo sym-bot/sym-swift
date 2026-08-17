@@ -145,6 +145,30 @@ public enum SymFrameType: String, Codable, Sendable {
     /// Node self-report tally — emitted/admitted/memory counts a mesh observer
     /// can display for this (possibly sovereign/cross-device) node. See MMP Section 7.
     case nodeStats = "node-stats"
+    /// A discriminator this build does not recognise. Never emitted: the raw
+    /// value carries a NUL that no wire producer can send. Decoding maps every
+    /// unrecognized `type` here, so a frame type added to the protocol after
+    /// this client shipped is ignored rather than fatal.
+    case unknown = "\u{0}unknown"
+
+    /// Tolerant discriminator.
+    ///
+    /// A `String`-raw-value enum throws `DecodingError.dataCorrupted` on an
+    /// unrecognized value, and because ``SymFrame/type`` is non-optional that
+    /// kills the WHOLE frame — so any frame type added to the wire after a
+    /// Swift client ships breaks that client's decode of those frames,
+    /// silently, for as long as it is in the field.
+    ///
+    /// `attestation` was the second instance of that class; the first was
+    /// patched narrowly by ``rescueV2CMBFrame``. A rescue per shape does not
+    /// converge, so the discriminator itself is made tolerant: unknown maps to
+    /// a case instead of throwing, and every future wire addition becomes a
+    /// no-op for old clients rather than a dropped frame plus an error per
+    /// copy per peer.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = SymFrameType(rawValue: raw) ?? .unknown
+    }
 }
 
 // MARK: - Frame
@@ -439,6 +463,14 @@ final class SymFrameParser {
     private static let maxFrameSize: UInt32 = 65536
     private let logger = Logger(subsystem: "bot.sym", category: "FrameParser")
 
+    /// Unrecognized discriminators already reported on this connection.
+    ///
+    /// One line per novel type, not per frame: every peer on a roster relays
+    /// the same frame, so the failure this change removes was amplified by the
+    /// peer count (one attestation, eight peers, eight logged failures). A log
+    /// per occurrence would reproduce that flood at a quieter level.
+    private var reportedUnknownTypes: Set<String> = []
+
     /// Parse any complete frames from the accumulated buffer.
     func feed(_ data: Data) -> [SymFrame] {
         buffer.append(data)
@@ -462,6 +494,10 @@ final class SymFrameParser {
 
             do {
                 let frame = try JSONDecoder().decode(SymFrame.self, from: jsonData)
+                if frame.type == .unknown {
+                    noteUnknownFrameType(jsonData)
+                    continue
+                }
                 frames.append(frame)
             } catch {
                 // Second pass: a boundary (two-section) record in the `cmb`
@@ -486,6 +522,27 @@ final class SymFrameParser {
     /// Reset the parser state.
     func reset() {
         buffer.removeAll()
+        reportedUnknownTypes.removeAll()
+    }
+
+    /// Report an ignored frame type once per connection, at info.
+    ///
+    /// The frame is dropped: this build has no handler for it, and the
+    /// length-prefixed stream is unaffected either way because ``feed(_:)``
+    /// advances the buffer before decoding. Info rather than error — an
+    /// unrecognized type is a peer running ahead of this client, which is
+    /// expected on a mixed-version mesh, not a fault.
+    ///
+    /// The asymmetry is deliberate and worth knowing: an ignored frame is
+    /// indistinguishable from one this client SHOULD have handled. The log
+    /// line is what makes the difference visible without costing a failure.
+    private func noteUnknownFrameType(_ jsonData: Data) {
+        let object = (try? JSONSerialization.jsonObject(with: jsonData)) as? [String: Any]
+        let type = (object?["type"] as? String) ?? "<unreadable>"
+        guard reportedUnknownTypes.insert(type).inserted else { return }
+        logger.info(
+            "[SYM] frame: ignoring unrecognized type \"\(type)\" — this build predates it; frame dropped, stream intact"
+        )
     }
 
     /// Rescue a frame whose `cmb` member is a v2 two-section record.

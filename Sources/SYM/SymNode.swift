@@ -1989,6 +1989,13 @@ public final class SymNode {
             let msg = frame.content ?? "unknown"
             logger.warning("[SYM] error frame from \(peerName): \(code) \(msg)")
             emit(.metric(type: "error-received", detail: ["code": "\(code)", "peer": peerName]))
+
+        case .unknown:
+            // Unreachable in practice — the parser drops unrecognized types and
+            // logs them once per connection. Present so this switch stays
+            // exhaustive, and so a frame reaching here is ignored rather than
+            // trapped if a future caller builds a SymFrame outside the parser.
+            break
         }
     }
 }
