@@ -2,6 +2,22 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.4.6
+
+### Fixed
+
+- **An unrecognized frame type no longer kills the frame.** `SymFrameType` is a `String`-raw-value enum and `SymFrame.type` is non-optional, so a discriminator this SDK did not know threw `DecodingError.dataCorrupted` and failed the entire frame. The consequence was structural rather than cosmetic: **every frame type added to the wire after a client shipped broke that client's decode of those frames, silently, for as long as it stayed in the field.**
+
+  Observed live — JS nodes emit `attestation`, no Swift client had the case, and because each peer relays the same frame the failure was amplified by the roster: one attestation cost one decode failure per peer per copy.
+
+  This was the second instance of the class. The first was a v2 two-section record in the `cmb` member, patched narrowly by an internal rescue for that one shape. A rescue per shape does not converge, so the discriminator itself is tolerant now: unrecognized values decode to `SymFrameType.unknown`, the frame is ignored rather than failed, and future wire additions are a no-op for older clients.
+
+  Ignored frames are reported once per novel type per connection, at info — not once per frame, which would have reproduced the same peer-count amplification more quietly. An ignored frame is deliberately still distinguishable from a handled one: the log line is what keeps that visible without costing a failure.
+
+  Adding `attestation` as a real case would have fixed the symptom and left the mechanism. Whether Swift clients should *handle* attestations rather than ignore them is a separate question and is not answered here.
+
+  The length-prefixed stream never desynced on this path — the parser advances its buffer before decoding — so the cost was a dropped frame and log noise, never a torn-down session.
+
 ## 0.4.1
 
 ### Added
