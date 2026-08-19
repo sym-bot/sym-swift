@@ -306,6 +306,13 @@ public final class SymNode {
     /// Active peer sessions keyed by nodeId. Access only via peerQueue.
     private var peers: [String: PeerState] = [:]
     private let peerQueue = DispatchQueue(label: "bot.sym.peers", qos: .userInitiated)
+    /// Relay peers we have already introduced ourselves to THIS relay session (handshake +
+    /// wake-channel sent). A handshake is sent once per peer per session: the directory re-announces
+    /// stale entries every refresh, and a sym-swift peer answers a handshake by adding us — so two
+    /// sym-swift nodes echoed handshake+wake-channel at each other until the relay's rate limit
+    /// closed both (0.4.6; 100 handshakes in 26 ms, measured by dev-team-2). Cleared on relay
+    /// disconnect, and per peer when the relay loses it, so a returning peer is greeted again.
+    private var relayHandshakeSent: Set<String> = []
 
     /// Protects non-peer mutable state: eventHandlers, _running, wakeChannel, pendingSessions.
     private let stateQueue = DispatchQueue(label: "bot.sym.state", qos: .userInitiated)
@@ -1406,11 +1413,21 @@ public final class SymNode {
             return true
         }
 
-        // Send handshake + wake channel via relay. MMP v0.2.2: no state-sync —
-        // hidden states never cross the wire (SVAF, Xu 2026, §3.4).
-        relaySession?.send(.handshake(nodeId: identity.nodeId, name: name, publicKey: identity.publicKey, e2ePublicKey: e2ePublicKeyB64, lifecycleRole: "observer"), to: nodeId)
-        if let wc = wakeChannel {
-            relaySession?.send(.wakeChannel(platform: wc.platform, token: wc.token, environment: wc.environment), to: nodeId)
+        // Send handshake + wake channel via relay — ONCE per peer per relay session. MMP v0.2.2: no
+        // state-sync — hidden states never cross the wire (SVAF, Xu 2026, §3.4). Unconditional
+        // sending here was the echo: A's handshake → B adds A and handshakes → A adds B and
+        // handshakes → … until the relay closed both. The exchange now terminates after one
+        // handshake each way: the receiver's reply lands on a sender that already has it in the set.
+        let firstIntroduction = peerQueue.sync { () -> Bool in
+            if self.relayHandshakeSent.contains(nodeId) { return false }
+            self.relayHandshakeSent.insert(nodeId)
+            return true
+        }
+        if firstIntroduction {
+            relaySession?.send(.handshake(nodeId: identity.nodeId, name: name, publicKey: identity.publicKey, e2ePublicKey: e2ePublicKeyB64, lifecycleRole: "observer"), to: nodeId)
+            if let wc = wakeChannel {
+                relaySession?.send(.wakeChannel(platform: wc.platform, token: wc.token, environment: wc.environment), to: nodeId)
+            }
         }
 
         if isNew {
@@ -1449,7 +1466,8 @@ public final class SymNode {
     /// Section 5.5: on relay disconnect, close relay transports only — Bonjour survives.
     private func removeRelayTransports() {
         let peerIds: [String] = peerQueue.sync {
-            self.peers.filter { $0.value.transports.keys.contains("relay") }.map(\.key)
+            self.relayHandshakeSent.removeAll()   // a new relay session greets everyone once again
+            return self.peers.filter { $0.value.transports.keys.contains("relay") }.map(\.key)
         }
         for nodeId in peerIds {
             removeTransport(nodeId: nodeId, source: "relay")
@@ -2121,6 +2139,7 @@ extension SymNode: SymRelaySessionDelegate {
 
     func relayDidLosePeer(nodeId: String, name: String) {
         // Section 4.6 + 5.5: remove relay transport only — Bonjour survives
+        peerQueue.sync { _ = self.relayHandshakeSent.remove(nodeId) }   // greet it again if it returns
         removeTransport(nodeId: nodeId, source: "relay")
     }
 

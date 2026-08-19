@@ -2,6 +2,14 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.4.7
+
+### Fixed
+
+- **Two sym-swift nodes no longer storm the relay with handshakes.** `addRelayPeer` sent a handshake + wake-channel on EVERY call, and an incoming handshake called `addRelayPeer` — so A's handshake made B handshake, which made A handshake, forever; the directory refresh re-greeted stale entries every cycle as well. Measured by dev-team-2 on sym-relay 0.1.3 with two MeloTune 3.1 simulators: one node alone sent 48 handshakes + 48 wake-channels in 15 s; the moment a second authenticated, 100 handshakes in 26 ms and 225 + 74 in 1.2 s, then the relay's rate limit (burst 300) closed both, reconnect, repeat every 2–9 s — Music Mates over the internet could not hold a connection for 2 s.
+
+  The handshake is now sent **once per peer per relay session** (a `relayHandshakeSent` set: cleared when the relay disconnects, and per peer when the relay loses it, so a returning peer is greeted again). The exchange terminates after one handshake each way: the receiver's reply lands on a sender that already has it in the set. The Bonjour path was never affected (it handshakes once in `sessionDidBecomeReady`), and sym-swift ↔ Node peers never looped because the Node side does not answer a handshake with a handshake. Verified against dev-team-2's two-simulator relay rig before the tag.
+
 ## 0.4.6
 
 ### Fixed
