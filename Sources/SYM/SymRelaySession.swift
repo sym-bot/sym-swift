@@ -178,14 +178,21 @@ final class SymRelaySession: @unchecked Sendable {
     /// ``SymNodeStatus/relayConnected`` reports; the existence of a session
     /// object is NOT evidence of a connection.
     ///
-    /// Known residual window: the relay acknowledges acceptance only
-    /// implicitly (its first `relay-peers` message), so between the auth
-    /// frame leaving and a refusal arriving this reads `true` for a node the
-    /// relay is about to decline. Tightening it to a relay-proven signal
-    /// would delay sends that currently succeed in that window, so it is
-    /// named here rather than changed blind: a client that needs certainty
-    /// should also read ``lastClose`` — a refusal populates it whether it
-    /// arrives as a `relay-error` message or a 4xxx socket close.
+    /// Known window, and it is not small in production: the relay
+    /// acknowledges acceptance only implicitly (its first `relay-peers`
+    /// message), so between the auth frame leaving and a refusal arriving
+    /// this reads `true` for a node the relay is about to decline.
+    /// Tightening it to a relay-proven signal would delay sends that
+    /// currently succeed in that window, so it is named rather than changed
+    /// blind.
+    ///
+    /// Measured against the deployed relay: a refused node reads
+    /// `true → false → true` on a ~20 s cycle and never settles, because the
+    /// edge holds the refused socket open ~20 s and the session then retries
+    /// the same hopeless auth. So a client that needs to know whether it is
+    /// actually on the mesh must read ``lastClose`` — a refusal populates it
+    /// within half a second, whether it arrives as a `relay-error` message
+    /// or a 4xxx socket close, and it stays stable across every flip.
     var isConnected: Bool {
         get { stateLock.lock(); defer { stateLock.unlock() }; return _isConnected }
         set { stateLock.lock(); _isConnected = newValue; stateLock.unlock() }

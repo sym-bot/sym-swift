@@ -213,17 +213,35 @@ public struct SymNodeStatus: Sendable {
     public let port: UInt16
     /// Relay URL string, or nil if no relay configured.
     public let relay: String?
-    /// Whether the relay WebSocket is currently connected — authenticated
-    /// and not since closed.
+    /// Whether the relay socket is up **right now** — NOT whether this node
+    /// is on the mesh. Do not read it alone.
     ///
-    /// This used to report whether a relay session OBJECT existed, which is
+    /// It used to report whether a relay session OBJECT existed, which is
     /// true from the moment a relay is configured and stays true after the
-    /// relay closes the socket refusing the node. Any indicator built on
-    /// the old value was reporting a connection the node did not have.
+    /// relay closes the socket refusing the node. It now tracks the real
+    /// socket, but a socket is still not a membership, and against a real
+    /// deployment the difference is stark: measured on the deployed relay,
+    /// a node with a token the relay will NEVER accept reads
+    /// `true → false → true` on a ~20 s cycle, indefinitely, and is `true`
+    /// most of the time. The edge holds the refused socket open for ~20 s,
+    /// so the close arrives late, and the session then reconnects into the
+    /// same hopeless auth.
+    ///
+    /// **A client asking "am I on the mesh?" must consult ``relayClose``**,
+    /// which is populated within half a second of the refusal and stays
+    /// stable and correct across every flip. Reading `relayConnected` alone
+    /// gives a flickering `true` for a relay that is refusing you — the same
+    /// wrong conclusion the original defect produced, reached by a different
+    /// route.
     public let relayConnected: Bool
     /// How the relay connection last ended, or nil while it has never
     /// closed. Distinguishes a refusal (bad token, duplicate identity) from
     /// a transport drop — see ``SymRelayClose/wasRefused``.
+    ///
+    /// In production this is the **only reliable refusal signal**: unlike
+    /// ``relayConnected`` it does not oscillate while a refused session
+    /// retries. Gate a "you are connected" indicator on
+    /// `relayConnected && relayClose?.wasRefused != true`.
     public let relayClose: SymRelayClose?
     /// Connected peers with coupling state.
     public let peers: [SymPeerInfo]

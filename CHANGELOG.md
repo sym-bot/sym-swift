@@ -24,13 +24,19 @@
 
   The accurate value already existed one layer down and was simply never surfaced. It moves behind a lock on the way out, because it is written from the send-completion handler on an arbitrary thread and read from whichever thread calls `status()`; surfacing it as-is would have swapped a wrong value for a racy one.
 
-- **`SymNodeStatus.relayClose` tells a refusal from a dropped connection.** `wasRefused` is true for application close codes (4000–4999) — a bad token, a duplicate identity — so an app can distinguish "the relay refused me" from "nobody answered". An app that cannot tell those apart cannot say anything true about an empty room: it may be reporting a place it never reached.
+  **`relayConnected` answers "is the socket up right now", not "am I on the mesh", and must not be read alone.** Measured on the deployed relay by dev-team-2 over 45 s: a node whose token the relay will never accept reads `true → false → true` on a ~20 s cycle, indefinitely, and is `true` most of the time. The edge holds the refused socket open ~20 s so the close arrives late, and the session then reconnects into the same hopeless auth. Against a controlled relay the same code reports `false` within 253 ms — the behaviour is the deployment's, not the SDK's, but the consequence for a client is real either way. Gate a connected indicator on `relayConnected && relayClose?.wasRefused != true`.
+
+- **`SymNodeStatus.relayClose` tells a refusal from a dropped connection.** `wasRefused` is true for application close codes (4000–4999) — a bad token, a duplicate identity — and for a refusal the relay states in its own `relay-error` message, which was previously logged and discarded. A stated refusal is kept in preference to the transport close that follows it, so a retry cannot bury the one message that explains everything.
+
+  An app that cannot tell a refusal from silence cannot say anything true about an empty room: it may be reporting a place it never reached. **In production this is the only reliable refusal signal** — unlike `relayConnected` it does not oscillate while a refused session retries; it was populated correctly at 510 ms in the rig check and stayed stable and correct through every flip.
 
 - **A payload on an end-to-end-encrypted frame no longer takes the whole frame down with it.** The E2E path clears `cmb` after moving the categories into `encryptedFields`, and nesting the payload under a synthesized `cmb` there produced a block missing every required member: the decode failed, the v2 rescue did not match, and the receiver dropped frame and payload together, silently. Such frames now carry the payload at top level; the Node-facing plaintext path is unchanged.
 
 ### Known
 
 - sym-swift's own sources do not compile under the **Swift 6 language mode** — pre-existing `@Sendable` capture errors in `SymDiscovery` and `SymPeerSession`, unrelated to this release. The library builds in its own Swift 5 mode and a Swift 6 app consuming it is unaffected, which the bundled `StrictConcurrencyConsumerProbe` and an external Swift 6 consumer package both demonstrate. Recorded here so the next consumer is not surprised.
+
+- **A refused relay session retries forever.** A 4003 (invalid token) is a *permanent* refusal — the token will not become valid by trying again — but the session treats it like any transport drop and reconnects on the usual backoff, so a misconfigured app hammers the relay indefinitely. The relay already treats 4006 (duplicate identity) as a hard stop clients should not retry, and 4003 arguably deserves the same or a much longer backoff. Found during the 0.5.0 rig check; deliberately not fixed here because changing retry policy is its own change with its own review, and `relayClose.wasRefused` already lets a client stop on its own.
 
 ## 0.4.7
 
