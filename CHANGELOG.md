@@ -2,6 +2,36 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.5.0 (unreleased)
+
+### Added
+
+- **Request/response over the mesh — `node.exchange`.** Send a directed CMB carrying an application payload and `await` the peer's reply. `SymExchange.request(payload:categories:to:timeout:)` generates a correlation id, injects it into the payload, and suspends until the matching response arrives; `SymNode.respond(to:payload:categories:)` is the responder half, and a payload nobody is awaiting surfaces as `SymEvent.requestReceived(envelope:)` — an app that only issues requests and an app that also serves them use the same two calls.
+
+  **The timeout is caller-set per call, with no default**, because call classes genuinely differ: a query the user is watching should give up in seconds, while one riding out an upstream cold start should not. Peer departure deliberately does **not** fast-fail — relay presence flaps while a sleeping upstream wakes, and the response may still arrive, so the caller's window is the only contract. Cancelling the awaiting `Task` fails with `.cancelled`; stopping the node (including the app suspension that stops it) fails every pending request with `.interrupted` rather than leaving a continuation only a departed peer could resume. A response arriving after its timeout is not an error — it becomes an ordinary uncorrelated payload the app may ignore or salvage.
+
+  **Why a separate handle rather than a method on `SymNode`:** `SymNode` is not `Sendable`, so `await`ing a method on it from an actor-isolated context sends the class across an isolation boundary — which the Swift 6 language mode rejects, and an actor-isolated service is exactly what consumes this. Verified against a throwaway Swift 6 package with a `@MainActor` call site before the shape was chosen. `SymExchange` is a `Sendable` value holding a lock-protected registry and one dispatch closure; hold it wherever you hold the node. `@unchecked Sendable` is claimed only for that registry — one dictionary under one lock, no public surface — and never for `SymNode`, where nothing would back the claim.
+
+  On the wire the payload rides **inside** the `cmb` object as a sibling of the CAT7 content, matching what Node reads, and is joined **after** the CMB is signed so it can never enter the block key or a signing preimage. Additive: a frame without a payload is byte-identical to 0.4.7, and a pre-0.5.0 receiver ignores the member.
+
+- **`SymInviteURL` — one parser and formatter for `sym://` invite links.** `sym://invite/v1?relay=…&token=…&room=…&name=…`, so no app carries its own regex and two apps cannot disagree about what a link means. The optional `name` is display-only, letting a join sheet say what is being joined instead of every app carrying the label out of band.
+
+  **A present-but-empty `room=` is malformed, not absent.** The empty string is itself a real relay partition — the unnamed one every pre-room client occupies — so reading it as "no room" would silently join the holder to everyone. Absent stays `nil`; present-but-empty is refused, as is an unknown version segment and any non-`wss` relay. Canonical output fixes parameter order so links round-trip byte-stably for QR codes, and `description` redacts the token: the most common way a bearer credential leaks is a log line written by someone who never thought of it as a secret.
+
+### Fixed
+
+- **`SymNodeStatus.relayConnected` reported a connection the node did not have.** It was `relaySession != nil` — the existence of a session *object*, which is true from the moment a relay is configured and stays true after the relay closes the socket refusing the node. Found by dev-team-2 on a real rig: MeloTune was handed a token the deployed relay does not accept, the socket upgraded and died ~17 s later, and `status()` reported connected throughout. A reach indicator was about to be built on it.
+
+  The accurate value already existed one layer down and was simply never surfaced. It moves behind a lock on the way out, because it is written from the send-completion handler on an arbitrary thread and read from whichever thread calls `status()`; surfacing it as-is would have swapped a wrong value for a racy one.
+
+- **`SymNodeStatus.relayClose` tells a refusal from a dropped connection.** `wasRefused` is true for application close codes (4000–4999) — a bad token, a duplicate identity — so an app can distinguish "the relay refused me" from "nobody answered". An app that cannot tell those apart cannot say anything true about an empty room: it may be reporting a place it never reached.
+
+- **A payload on an end-to-end-encrypted frame no longer takes the whole frame down with it.** The E2E path clears `cmb` after moving the categories into `encryptedFields`, and nesting the payload under a synthesized `cmb` there produced a block missing every required member: the decode failed, the v2 rescue did not match, and the receiver dropped frame and payload together, silently. Such frames now carry the payload at top level; the Node-facing plaintext path is unchanged.
+
+### Known
+
+- sym-swift's own sources do not compile under the **Swift 6 language mode** — pre-existing `@Sendable` capture errors in `SymDiscovery` and `SymPeerSession`, unrelated to this release. The library builds in its own Swift 5 mode and a Swift 6 app consuming it is unaffected, which the bundled `StrictConcurrencyConsumerProbe` and an external Swift 6 consumer package both demonstrate. Recorded here so the next consumer is not surprised.
+
 ## 0.4.7
 
 ### Fixed
