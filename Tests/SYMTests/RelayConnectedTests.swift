@@ -68,4 +68,14 @@ final class RelayConnectedTests: XCTestCase {
         XCTAssertFalse(SymRelayClose(code: nil, reason: "no code").wasRefused,
                        "no code is not evidence of refusal")
     }
+
+    func testRelayStatedRefusalReadsAsRefusedWithoutACloseCode() {
+        // A refusal can arrive as the relay's own relay-error message before
+        // (or instead of) a 4xxx socket close. Carrying only the close code
+        // would lose it.
+        let stated = SymRelayClose(code: nil, reason: "invalid token", statedByRelay: true)
+        XCTAssertTrue(stated.wasRefused,
+                      "the relay saying so is at least as good as a close code")
+        XCTAssertEqual(stated.reason, "invalid token")
+    }
 }

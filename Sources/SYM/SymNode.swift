@@ -175,17 +175,25 @@ public enum SymPeerReachability: String, Sendable, Hashable, CaseIterable {
 public struct SymRelayClose: Sendable, Equatable {
     /// WebSocket close code, when the socket reported one.
     public let code: Int?
-    /// Human-readable reason from the transport.
+    /// Human-readable reason — from the relay when it stated one, otherwise
+    /// from the transport.
     public let reason: String?
+    /// True when this came from the relay's own `relay-error` message rather
+    /// than from the socket closing. A stated refusal is kept in preference
+    /// to the transport close that follows it.
+    public let statedByRelay: Bool
 
-    public init(code: Int?, reason: String?) {
+    public init(code: Int?, reason: String?, statedByRelay: Bool = false) {
         self.code = code
         self.reason = reason
+        self.statedByRelay = statedByRelay
     }
 
-    /// True when the relay itself declined this node (application close
-    /// codes 4000–4999), as opposed to the connection dropping.
+    /// True when the relay declined this node rather than the connection
+    /// merely dropping: an application close code (4000–4999), or the relay
+    /// saying so in its own words.
     public var wasRefused: Bool {
+        if statedByRelay { return true }
         guard let code else { return false }
         return (4000...4999).contains(code)
     }

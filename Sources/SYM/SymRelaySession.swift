@@ -173,9 +173,19 @@ final class SymRelaySession: @unchecked Sendable {
     private var _isConnected = false
     private var _lastClose: SymRelayClose?
 
-    /// Whether the relay socket is actually up — authenticated and not since
-    /// closed. This is the value ``SymNodeStatus/relayConnected`` reports;
-    /// the existence of a session object is NOT evidence of a connection.
+    /// Whether the relay socket is up and this node's auth frame has been
+    /// sent without transport error. This is the value
+    /// ``SymNodeStatus/relayConnected`` reports; the existence of a session
+    /// object is NOT evidence of a connection.
+    ///
+    /// Known residual window: the relay acknowledges acceptance only
+    /// implicitly (its first `relay-peers` message), so between the auth
+    /// frame leaving and a refusal arriving this reads `true` for a node the
+    /// relay is about to decline. Tightening it to a relay-proven signal
+    /// would delay sends that currently succeed in that window, so it is
+    /// named here rather than changed blind: a client that needs certainty
+    /// should also read ``lastClose`` — a refusal populates it whether it
+    /// arrives as a `relay-error` message or a 4xxx socket close.
     var isConnected: Bool {
         get { stateLock.lock(); defer { stateLock.unlock() }; return _isConnected }
         set { stateLock.lock(); _isConnected = newValue; stateLock.unlock() }
@@ -186,6 +196,17 @@ final class SymRelaySession: @unchecked Sendable {
         stateLock.lock(); defer { stateLock.unlock() }; return _lastClose
     }
 
+    /// Record a refusal the relay stated in a message, without touching the
+    /// socket state — the socket may well still be open at this point.
+    /// A stated refusal is never overwritten by the transport close that
+    /// follows it: the relay's own words are the better explanation, and the
+    /// close that comes a moment later would otherwise bury them.
+    private func recordRelayError(_ message: String) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        _lastClose = SymRelayClose(code: nil, reason: message, statedByRelay: true)
+    }
+
     /// Atomically transition connected → disconnected, recording how.
     /// Returns false if the session was already disconnected, which is the
     /// double-disconnect guard (an old receive loop can still be running).
@@ -194,7 +215,9 @@ final class SymRelaySession: @unchecked Sendable {
         defer { stateLock.unlock() }
         guard _isConnected else { return false }
         _isConnected = false
-        if let close { _lastClose = close }
+        // A refusal the relay already stated outranks the transport close
+        // that follows it — see recordRelayError.
+        if let close, _lastClose?.statedByRelay != true { _lastClose = close }
         return true
     }
     private var reconnectDelay: TimeInterval = 1.0
@@ -412,6 +435,12 @@ final class SymRelaySession: @unchecked Sendable {
 
         case "relay-error":
             let msg = json["message"] as? String ?? "Unknown relay error"
+            // A refusal can reach us two ways: the socket closes with a 4xxx
+            // code, or the relay says so in a message first. Recording both
+            // means a client asking "why am I not on the channel?" gets an
+            // answer either way — logging it only, as before, left the app
+            // with a silent non-membership it could not describe.
+            recordRelayError(msg)
             logger.error("[SYM] relay: error: \(msg)")
 
         default:
