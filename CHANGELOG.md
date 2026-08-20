@@ -4,11 +4,15 @@
 
 ## 0.5.0
 
-### Breaking for consumers
+### Breaking for consumers — in two different ways, and the quiet one is worse
 
-- **`SymEvent` gained a case, so an exhaustive `switch` over it stops compiling.** `requestReceived(envelope:)` is additive on the wire and additive to the type, but adding a case to a public non-frozen enum is **source-breaking in Swift**: any consumer that switches over `SymEvent` without a `default` fails with *switch must be exhaustive*. Found on arrival by dev-team-2 pinning MeloTune — the build failed and zero tests ran.
+`SymEvent` gained `requestReceived(envelope:)`. This is additive on the wire and additive to the type, but **not additive for a consumer**, and which failure you get depends on how your `switch` over `SymEvent` ends. Both cohorts must act; only one is told by the compiler.
 
-  **Add an explicit `case .requestReceived` rather than a `default:`.** A `default` also swallows every case a future SDK adds, which is the silent-drop failure mode; an explicit case keeps the compiler as your tripwire. An app that answers no requests can log the request id and sender and let the sender's timeout do its job.
+- **Plain exhaustive `switch`, no default → the build fails.** *Switch must be exhaustive.* Loud, immediate, and it gets noticed — dev-team-2 hit this pinning MeloTune, where the build failed and **zero tests ran**. Read the `.xcresult` rather than a command's exit code, or "zero tests ran" reads as success.
+
+- **`@unknown default:` → the build goes GREEN and the new event is silently discarded.** This is the dangerous cohort, and it will not know it is in it, because nothing reports a fault. `@unknown default` is the construct Swift *recommends* for non-frozen enums from another module, so a consumer following best practice lands here by default. **It is not protection against this change — it is the silent-drop path.** An app that intends to serve inbound requests will compile, ship, connect, and never answer a single one, surfacing only as the mesh being mysteriously quiet. Found by dev-team-3 checking MeloMove against the tag *before* bumping.
+
+**Add an explicit `case .requestReceived` for any event you intend to act on.** Neither `default:` nor `@unknown default:` is a substitute: both also swallow every case a future SDK adds. An explicit case keeps the compiler as your tripwire. An app that answers no requests can log the request id and sender inside that case and let the sender's timeout do its job.
 
 ### Added
 
