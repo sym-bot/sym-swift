@@ -272,6 +272,16 @@ public struct SymFrame: Codable, Sendable {
     /// See MMP v0.2.1 Section 13.6.
     public var isAnchor: Bool?
 
+    /// Opaque application payload riding INSIDE the wire `cmb` object as a
+    /// sibling of the CAT7 categories — the Node convention (`frame-handler.js`
+    /// reads `msg.cmb.payload`; the llm-sidecar writes `payload:{request_id:…}`).
+    /// JSON bytes of a top-level object. NOT in CodingKeys: the payload is
+    /// NEVER part of the cmbKey hash or any signing preimage — signing binds
+    /// CAT7 content only, so ``serialize()`` joins it to the `cmb` object
+    /// after the (already-signed) CMB encodes, and the parser lifts it back
+    /// out on receive. A pre-0.5.0 receiver's Codable ignores the key.
+    public var cmbPayload: Data? = nil
+
     private enum CodingKeys: String, CodingKey {
         case type, nodeId, name, version, extensions, publicKey, e2ePublicKey, lifecycleRole
         case h1, h2, confidence
@@ -433,15 +443,41 @@ extension SymFrame {
         let encoder = JSONEncoder()
         var json = try encoder.encode(self)
 
-        // cmbV2 is outside CodingKeys (the flat decode must never trip on
-        // it), so a v2-carrying frame is assembled here: the record encodes
-        // separately and joins the frame object under the same "cmb" key the
-        // rescue parser reads on the far side. Exactly one of cmb/cmbV2 is
-        // ever set, so the key cannot collide.
-        if let record = cmbV2,
+        // cmbV2 and cmbPayload are outside CodingKeys (the flat decode must
+        // never trip on them), so a frame carrying either is assembled here.
+        // The v2 record encodes separately and joins the frame object under
+        // the same "cmb" key the rescue parser reads on the far side; exactly
+        // one of cmb/cmbV2 is ever set, so the key cannot collide. The
+        // payload joins INSIDE the "cmb" object as a sibling of the CAT7
+        // content — after the CMB was signed, so it can never enter a
+        // signing preimage. An encrypted frame has cleared `cmb`, in which
+        // case the payload becomes the object's only member (the receive
+        // path reconstructs the CMB from the outer frame regardless).
+        if cmbV2 != nil || cmbPayload != nil,
            var obj = try JSONSerialization.jsonObject(with: json) as? [String: Any] {
-            let recordJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record))
-            obj["cmb"] = recordJSON
+            if let record = cmbV2 {
+                let recordJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record))
+                obj["cmb"] = recordJSON
+            }
+            if let payloadData = cmbPayload,
+               let payloadJSON = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any] {
+                if var cmbObj = obj["cmb"] as? [String: Any] {
+                    cmbObj["payload"] = payloadJSON
+                    obj["cmb"] = cmbObj
+                } else {
+                    // No cmb object to be a sibling of — the E2E path clears
+                    // it (categories became `encryptedFields`). Synthesizing
+                    // a `cmb` holding only a payload makes the WHOLE frame
+                    // undecodable on the far side: the flat decode fails on
+                    // a CMB missing every required member and the frame is
+                    // dropped, silently, payload and all. So a cmb-less
+                    // frame carries the payload at top level instead. The
+                    // Node-facing plaintext path always has a cmb and always
+                    // uses `cmb.payload`; this branch is Swift↔Swift E2E,
+                    // where the frame shape already diverges by design.
+                    obj["cmbPayload"] = payloadJSON
+                }
+            }
             json = try JSONSerialization.data(withJSONObject: obj)
         }
 
@@ -493,10 +529,16 @@ final class SymFrameParser {
             buffer.removeSubrange(0..<totalNeeded)
 
             do {
-                let frame = try JSONDecoder().decode(SymFrame.self, from: jsonData)
+                var frame = try JSONDecoder().decode(SymFrame.self, from: jsonData)
                 if frame.type == .unknown {
                     noteUnknownFrameType(jsonData)
                     continue
+                }
+                // cmbPayload is outside CodingKeys (it lives INSIDE the wire
+                // "cmb" object, which decodes as a SYMCore type that ignores
+                // it), so a cmb frame gets a second look at the raw bytes.
+                if frame.type == .cmb {
+                    frame.cmbPayload = Self.extractCMBPayload(jsonData)
                 }
                 frames.append(frame)
             } catch {
@@ -507,7 +549,8 @@ final class SymFrameParser {
                 // exact shape, decode the v2 record separately, and re-decode
                 // the frame with the member excised. Anything else still
                 // fails loudly, exactly as before.
-                if let rescued = rescueV2CMBFrame(jsonData) {
+                if var rescued = rescueV2CMBFrame(jsonData) {
+                    rescued.cmbPayload = Self.extractCMBPayload(jsonData)
                     frames.append(rescued)
                     continue
                 }
@@ -543,6 +586,24 @@ final class SymFrameParser {
         logger.info(
             "[SYM] frame: ignoring unrecognized type \"\(type)\" — this build predates it; frame dropped, stream intact"
         )
+    }
+
+    /// Lift the opaque application payload out of the wire `cmb` object
+    /// (`cmb.payload`, the Node sibling-of-categories convention). Returns
+    /// the payload re-serialized as standalone JSON-object bytes, or nil
+    /// when absent or not an object.
+    static func extractCMBPayload(_ jsonData: Data) -> Data? {
+        guard let obj = (try? JSONSerialization.jsonObject(with: jsonData)) as? [String: Any] else { return nil }
+        // `cmb.payload` is the Node convention and the only shape a Node peer
+        // sends; the top-level fallback exists for cmb-less (E2E) frames.
+        if let cmbObj = obj["cmb"] as? [String: Any],
+           let payload = cmbObj["payload"] as? [String: Any] {
+            return try? JSONSerialization.data(withJSONObject: payload)
+        }
+        if let payload = obj["cmbPayload"] as? [String: Any] {
+            return try? JSONSerialization.data(withJSONObject: payload)
+        }
+        return nil
     }
 
     /// Rescue a frame whose `cmb` member is a v2 two-section record.

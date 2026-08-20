@@ -58,6 +58,14 @@ public enum SymEvent {
     /// - `isAnchor`: historical CMB replayed on peer reconnect — not a new signal
     /// - `isRemix`: CMB with lineage parents — re-remixing causes cascade storms
     case cmbAccepted(entry: SymMemoryEntry, isAnchor: Bool = false, isRemix: Bool = false)
+    /// A payload-bearing CMB arrived that no pending
+    /// ``SymNode/request(payload:categories:to:timeout:)`` was awaiting — an
+    /// inbound request for this node to serve (or an uncorrelated late
+    /// response; the payload's own protocol distinguishes them). Build the
+    /// reply with ``SymNode/respond(to:payload:categories:)``. Emitted
+    /// BEFORE and independent of the SVAF verdict on the carrying CMB, so
+    /// the payload survives both admitted and rejected outcomes.
+    case requestReceived(envelope: SymEnvelope)
     /// Protocol-level metric event for observability.
     case metric(type: String, detail: [String: String])
 }
@@ -155,6 +163,34 @@ public enum SymPeerReachability: String, Sendable, Hashable, CaseIterable {
     case relay
 }
 
+// MARK: - Relay Close
+
+/// How a relay connection ended.
+///
+/// A client that cannot tell "the relay refused me" from "nobody answered"
+/// cannot tell its user anything true, so the close code is surfaced rather
+/// than collapsed into a bool. Application close codes (4xxx) are the relay
+/// declining this node — a bad token, a duplicate identity — and are worth
+/// showing; a transport drop is worth retrying quietly.
+public struct SymRelayClose: Sendable, Equatable {
+    /// WebSocket close code, when the socket reported one.
+    public let code: Int?
+    /// Human-readable reason from the transport.
+    public let reason: String?
+
+    public init(code: Int?, reason: String?) {
+        self.code = code
+        self.reason = reason
+    }
+
+    /// True when the relay itself declined this node (application close
+    /// codes 4000–4999), as opposed to the connection dropping.
+    public var wasRefused: Bool {
+        guard let code else { return false }
+        return (4000...4999).contains(code)
+    }
+}
+
 // MARK: - Node Status
 
 /// Full node status snapshot. See MMP v0.2.0 Section 13 (Application).
@@ -169,8 +205,18 @@ public struct SymNodeStatus: Sendable {
     public let port: UInt16
     /// Relay URL string, or nil if no relay configured.
     public let relay: String?
-    /// Whether the relay WebSocket is currently connected.
+    /// Whether the relay WebSocket is currently connected — authenticated
+    /// and not since closed.
+    ///
+    /// This used to report whether a relay session OBJECT existed, which is
+    /// true from the moment a relay is configured and stays true after the
+    /// relay closes the socket refusing the node. Any indicator built on
+    /// the old value was reporting a connection the node did not have.
     public let relayConnected: Bool
+    /// How the relay connection last ended, or nil while it has never
+    /// closed. Distinguishes a refusal (bad token, duplicate identity) from
+    /// a transport drop — see ``SymRelayClose/wasRefused``.
+    public let relayClose: SymRelayClose?
     /// Connected peers with coupling state.
     public let peers: [SymPeerInfo]
     /// Number of currently connected peers.
@@ -359,12 +405,30 @@ public final class SymNode {
         rejectsSignature(signed: signed, valid: valid, error: error)
     }
 
+    /// Test seam: build the payload-carrying frame without a live peer.
+    internal func testHook_makePayloadCMBFrame(payload: Data,
+                                               categories: [CMBCategory: CMBCategoryVector],
+                                               for peerId: String) -> SymFrame {
+        makePayloadCMBFrame(payload: payload, categories: categories, for: peerId)
+    }
+
+    /// Test seam: drive the inbound payload router without a live peer.
+    internal func testHook_handleIncomingPayload(_ payload: Data, from nodeId: String,
+                                                 peerName: String, cmbKey: String?) {
+        handleIncomingPayload(payload, from: nodeId, peerName: peerName, cmbKey: cmbKey)
+    }
+
     /// Section 6.4: CMB keys from validator/anchor nodes — anchor weight multiplier 2.0.
     /// Can't add property to CMBStoreEntry (binary framework), so track externally.
     private var validatorOriginKeys: Set<String> = []
 
     /// Event handlers. Access only via stateQueue.
     private var eventHandlers: [(SymEvent) -> Void] = []
+
+    /// Pending request/response correlations. Lives in its own lock-protected
+    /// type so the async surface can be vended as a `Sendable` handle — see
+    /// ``SymExchange``.
+    let correlationRegistry = SymCorrelationRegistry()
 
     /// Synthesis delegate for the xMesh synthesis loop. See MMP v0.2.0 Section 12.
     /// Agent processes peer xMesh insight through its own domain intelligence.
@@ -711,6 +775,20 @@ public final class SymNode {
         if !relayOnly {
             discovery.stop()
         }
+
+        // Pending requests never survive a stop (or the app suspension that
+        // calls it): fail every awaiting caller now rather than leaving a
+        // continuation that can only be resumed by a peer this node is no
+        // longer connected to. Fail-fast on resume is the contract; surviving
+        // suspension is an application-layer retry.
+        let orphaned = correlationRegistry.drain()
+        for continuation in orphaned {
+            continuation.resume(throwing: SymRequestError.interrupted)
+        }
+        if !orphaned.isEmpty {
+            logger.info("[SYM] node: stopped with \(orphaned.count) pending request(s) — failed as interrupted")
+        }
+
         logger.info("[SYM] node: stopped: \(self.name)")
     }
 
@@ -876,6 +954,103 @@ public final class SymNode {
             }
         }
         logger.info("[SYM] relay: \(cmb.key.prefix(20)) → \(currentPeers.count) peers")
+    }
+
+    // MARK: - Request/Response Correlation (0.5.0, reviewed sketch §5)
+
+    /// The `Sendable` handle carrying the async request surface.
+    ///
+    /// The async half lives on ``SymExchange`` rather than on this class
+    /// because `await`-ing a method on a non-`Sendable` class from an
+    /// actor-isolated context sends the class across an isolation boundary —
+    /// rejected under the Swift 6 language mode, which is what the consumers
+    /// of this surface run. Hold the handle wherever you hold the node; it
+    /// stays valid for the node's lifetime.
+    ///
+    /// A thin layer ABOVE the send path and the event tap: delivery
+    /// semantics are untouched, and a matched response still flows to
+    /// ``on(_:)`` subscribers. The payload rides the wire inside the `cmb`
+    /// object as a sibling of the CAT7 content (Node parity) and is never
+    /// part of the cmbKey hash or a signing preimage.
+    public var exchange: SymExchange {
+        SymExchange(registry: correlationRegistry) { [weak self] wirePayload, categories, peerId in
+            guard let self else { return .notRunning }
+            guard self.isRunning else { return .notRunning }
+            let peerIsRoutable: Bool = self.peerQueue.sync { self.peers[peerId] != nil }
+            guard peerIsRoutable else { return .peerUnknown }
+            let frame = self.makePayloadCMBFrame(payload: wirePayload, categories: categories, for: peerId)
+            self.sendToPeer(nodeId: peerId, frame: frame)
+            return .sent
+        }
+    }
+
+    /// Responder half: reply to a payload-bearing envelope, echoing its
+    /// `request_id` and targeting its sender. Everything else about the
+    /// reply is caller-built.
+    /// - Throws: ``SymRequestError/invalidPayload`` when the payload bytes
+    ///   do not encode a top-level JSON object.
+    public func respond(to request: SymEnvelope,
+                        payload: Data,
+                        categories: [CMBCategory: CMBCategoryVector]) throws {
+        guard var payloadObject = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any] else {
+            throw SymRequestError.invalidPayload
+        }
+        payloadObject["request_id"] = request.requestId
+        let wirePayload = try JSONSerialization.data(withJSONObject: payloadObject)
+        let frame = makePayloadCMBFrame(payload: wirePayload, categories: categories, for: request.from)
+        sendToPeer(nodeId: request.from, frame: frame)
+    }
+
+    /// Build the signed, payload-carrying CMB frame both halves send —
+    /// same per-peer E2E stance as ``relay(_:)``: categories encrypt when a
+    /// shared secret exists; the payload itself rides plaintext either way
+    /// (Node parity — the sidecar reads it as a plain sibling).
+    private func makePayloadCMBFrame(payload: Data,
+                                     categories: [CMBCategory: CMBCategoryVector],
+                                     for peerId: String) -> SymFrame {
+        let ts = UInt64(Date().timeIntervalSince1970 * 1000)
+        var cmb = CMBEncoder.createCMB(categories: categories, source: name, originTimestamp: ts, lineage: nil)
+        if let privateKey = identity.privateKey {
+            cmb = CMBSigning.sign(cmb, privateKeyBase64URL: privateKey)
+        }
+        var frame = SymFrame.cmb(
+            key: cmb.key, content: CMBEncoder.renderContent(from: cmb),
+            source: name, tags: [], originTimestamp: ts, storedAt: ts
+        )
+        frame.cmb = cmb
+        frame.cmbPayload = payload
+
+        let sharedSecretForPeer: SymmetricKey? = peerQueue.sync { self.peerSharedSecrets[peerId] }
+        if let sharedSecret = sharedSecretForPeer,
+           let encrypted = E2ECrypto.encryptCategories(cmb.categories, sharedSecret: sharedSecret) {
+            frame.encryptedCategories = encrypted.ciphertext
+            frame.e2e = E2EMetadata(nonce: encrypted.nonce)
+            frame.cmb = nil
+        }
+        return frame
+    }
+
+    /// Route an inbound payload: resolve the pending request it answers, or
+    /// surface it as ``SymEvent/requestReceived(envelope:)``. Called from the
+    /// cmb receive path AFTER signature verification and BEFORE the SVAF
+    /// verdict — the payload survives admitted and rejected outcomes alike
+    /// (Node parity: `_preserveIncomingPayload`).
+    private func handleIncomingPayload(_ payloadData: Data, from nodeId: String, peerName: String, cmbKey: String?) {
+        guard let payloadObject = (try? JSONSerialization.jsonObject(with: payloadData)) as? [String: Any],
+              let requestId = payloadObject["request_id"] as? String, !requestId.isEmpty else {
+            logger.info("[SYM] payload: CMB payload from \(peerName) carries no request_id — ignoring")
+            return
+        }
+        let envelope = SymEnvelope(from: nodeId, fromName: peerName, requestId: requestId,
+                                   payload: payloadData, cmbKey: cmbKey)
+        if let pending = correlationRegistry.take(requestId) {
+            pending.resume(returning: envelope)
+            logger.info("[SYM] payload: response matched request \(requestId.prefix(8))… from \(peerName)")
+            emit(.metric(type: "request-correlated", detail: ["request_id": requestId, "from": peerName]))
+        } else {
+            logger.info("[SYM] payload: inbound request \(requestId.prefix(8))… from \(peerName)")
+            emit(.requestReceived(envelope: envelope))
+        }
     }
 
     /// Search memories across local and peer stores by keyword. See MMP v0.2.0 Section 6.
@@ -1046,7 +1221,7 @@ public final class SymNode {
         frame.timestamp = UInt64(Date().timeIntervalSince1970 * 1000)
 
         let peerCount = peerQueue.sync { self.peers.count }
-        let relayConnected = relaySession != nil
+        let relayConnected = relaySession?.isConnected ?? false
         broadcastToPeers(frame)
         logger.info("[SYM] mood: broadcast: \(mood.prefix(50)) → \(peerCount) peer(s), relay: \(relayConnected)")
     }
@@ -1147,7 +1322,8 @@ public final class SymNode {
             running: _running,
             port: relayOnly ? 0 : discovery.port,
             relay: relayURL?.absoluteString,
-            relayConnected: relaySession != nil,
+            relayConnected: relaySession?.isConnected ?? false,
+            relayClose: relaySession?.lastClose,
             peers: peerInfo,
             peerCount: peerInfo.count,
             memoryCount: memoryCount,
@@ -1681,6 +1857,17 @@ public final class SymNode {
             let categoryCount = incomingCMB.categories.count
             let moodText = incomingCMB.categories[.mood]?.text ?? "none"
             logger.info("[SYM] cmb: received CMB \(incomingCMB.key.prefix(20)) from \(peerName) (\(categoryCount) categories, mood: \(moodText))")
+
+            // Application payload (0.5.0) — routed HERE, downstream of
+            // signature verification (a forged CMB delivers nothing) and
+            // upstream of echo detection and the SVAF verdict, so a payload
+            // survives BOTH outcomes. Node dropped payloads on exactly one
+            // of those paths once (admitted remixes were rebuilt from CAT7
+            // and lost the sibling); routing before the split is what makes
+            // that class unrepresentable here rather than merely fixed.
+            if let payloadData = frame.cmbPayload {
+                handleIncomingPayload(payloadData, from: nodeId, peerName: peerName, cmbKey: incomingCMB.key)
+            }
 
             // Echo loop prevention (MMP Section 14): if the incoming CMB's
             // lineage parents include a key that exists in our local meshmem,

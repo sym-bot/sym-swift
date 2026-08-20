@@ -166,7 +166,37 @@ final class SymRelaySession: @unchecked Sendable {
     // All mutable state below — access ONLY via `queue`.
     private var webSocketTask: URLSessionWebSocketTask?
     private var urlSession: URLSession?
-    private var isConnected = false
+    /// Live socket state, behind a lock because it is written from the
+    /// send-completion handler (an arbitrary thread) and read from whichever
+    /// thread calls `SymNode.status()`.
+    private let stateLock = NSLock()
+    private var _isConnected = false
+    private var _lastClose: SymRelayClose?
+
+    /// Whether the relay socket is actually up — authenticated and not since
+    /// closed. This is the value ``SymNodeStatus/relayConnected`` reports;
+    /// the existence of a session object is NOT evidence of a connection.
+    var isConnected: Bool {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _isConnected }
+        set { stateLock.lock(); _isConnected = newValue; stateLock.unlock() }
+    }
+
+    /// How the relay connection last ended, or nil if it never has.
+    var lastClose: SymRelayClose? {
+        stateLock.lock(); defer { stateLock.unlock() }; return _lastClose
+    }
+
+    /// Atomically transition connected → disconnected, recording how.
+    /// Returns false if the session was already disconnected, which is the
+    /// double-disconnect guard (an old receive loop can still be running).
+    private func markDisconnected(_ close: SymRelayClose?) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard _isConnected else { return false }
+        _isConnected = false
+        if let close { _lastClose = close }
+        return true
+    }
     private var reconnectDelay: TimeInterval = 1.0
     private var reconnectTask: Task<Void, Never>?
     private var _running = false
@@ -330,10 +360,15 @@ final class SymRelaySession: @unchecked Sendable {
                 self.receiveLoop()
 
             case .failure(let error):
-                // Guard against double disconnect (old receiveLoop still running)
-                guard self.isConnected else { return }
-                self.isConnected = false
-                self.logger.info("[SYM] relay: disconnected: \(error.localizedDescription)")
+                // Guard against double disconnect (old receiveLoop still
+                // running) — and record HOW it ended, so a client can tell
+                // "the relay refused me" from "nobody answered".
+                let close = SymRelayClose(
+                    code: self.webSocketTask?.closeCode.rawValue,
+                    reason: error.localizedDescription
+                )
+                guard self.markDisconnected(close) else { return }
+                self.logger.info("[SYM] relay: disconnected: \(error.localizedDescription) (close \(close.code.map(String.init) ?? "none"))")
                 self.delegate?.relayDidDisconnect(reason: error.localizedDescription)
                 self.scheduleReconnect()
             }
@@ -458,6 +493,24 @@ final class SymRelaySession: @unchecked Sendable {
             dict["cmb"] = cmbDict
         }
 
+        // Application payload rides INSIDE the cmb object (sibling of the
+        // CAT7 content — Node's `msg.cmb.payload`), joined here AFTER the
+        // signed CMB encoded so it can never enter a signing preimage. The
+        // relay codec bypasses SymFrame.serialize(), so the same join is
+        // needed on this path or requests silently lose correlation over
+        // the relay while working on LAN.
+        if let payloadData = frame.cmbPayload,
+           let payloadJSON = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any] {
+            if var cmbObj = dict["cmb"] as? [String: Any] {
+                cmbObj["payload"] = payloadJSON
+                dict["cmb"] = cmbObj
+            } else {
+                // Cmb-less (E2E) frame — a synthetic cmb holding only a
+                // payload is undecodable on the far side. See SymFrame.serialize().
+                dict["cmbPayload"] = payloadJSON
+            }
+        }
+
         return dict
     }
 
@@ -508,6 +561,16 @@ final class SymRelaySession: @unchecked Sendable {
            let cmbData = try? JSONSerialization.data(withJSONObject: cmbDict),
            let cmb = try? JSONDecoder().decode(CognitiveMemoryBlock.self, from: cmbData) {
             frame.cmb = cmb
+        }
+
+        // Lift the application payload back out of the cmb object (the
+        // CognitiveMemoryBlock decode above ignores the key). Mirrors
+        // SymFrameParser.extractCMBPayload on the LAN path.
+        if let cmbDict = dict["cmb"] as? [String: Any],
+           let payload = cmbDict["payload"] as? [String: Any] {
+            frame.cmbPayload = try? JSONSerialization.data(withJSONObject: payload)
+        } else if let payload = dict["cmbPayload"] as? [String: Any] {
+            frame.cmbPayload = try? JSONSerialization.data(withJSONObject: payload)
         }
 
         return frame
