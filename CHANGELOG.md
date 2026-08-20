@@ -2,7 +2,13 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
-## 0.5.0 (unreleased)
+## 0.5.0
+
+### Breaking for consumers
+
+- **`SymEvent` gained a case, so an exhaustive `switch` over it stops compiling.** `requestReceived(envelope:)` is additive on the wire and additive to the type, but adding a case to a public non-frozen enum is **source-breaking in Swift**: any consumer that switches over `SymEvent` without a `default` fails with *switch must be exhaustive*. Found on arrival by dev-team-2 pinning MeloTune — the build failed and zero tests ran.
+
+  **Add an explicit `case .requestReceived` rather than a `default:`.** A `default` also swallows every case a future SDK adds, which is the silent-drop failure mode; an explicit case keeps the compiler as your tripwire. An app that answers no requests can log the request id and sender and let the sender's timeout do its job.
 
 ### Added
 
