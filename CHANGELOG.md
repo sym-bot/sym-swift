@@ -2,6 +2,32 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.5.3
+
+### Added — the payload seal is now WIRED, and refusable
+
+0.5.1 shipped `payload-seal-v1` as a primitive that nothing called. The send path still assigned the payload in the clear, and every test stayed green because none asserted that a frame on the wire was sealed — the promise was in the release notes and not in the bytes. It is in the bytes now.
+
+A payload is **sealed whenever a payload key can be derived for the peer**, and rides plaintext when it cannot — which is every Node peer today, because the sidecar reads `msg.cmb.payload` as a plain sibling and sealing to it would be silent data loss rather than privacy. Peers' advertised public keys are retained past the handshake, since the payload key is derived per send with a different HKDF `info` than the cached category key.
+
+**`requireSeal:` on `SymExchange.request(...)`** — when true, the payload is sent **only** if it can be encrypted; otherwise nothing is sent and the call throws `.cannotSeal`.
+
+This exists because of a UX ruling, not an engineering one. A listener never sees the word "sealed" and is never asked to reason about it; the only binary they can act on is *whether a conversation is private to the two of them*. And the rule that governs any such indicator: **never show a security state the app cannot verify** — a padlock that is sometimes wrong is worse than no padlock, because it is the one UI element people actually rely on.
+
+`payloadSealState(for:)` answers whether the *next* send would be sealed, which is an inference about a moment that has not happened — the same shape as the `relayConnected` flag an app nearly rendered as a truth it did not have. `requireSeal` turns that into an invariant instead: an unsealed send stops being something to detect and becomes something that **cannot happen**. That is the difference between an app that believes a conversation is private and one that can say so. Default is `false`, because requiring a seal on the sidecar path would refuse every LLM call.
+
+On receive, **a seal that cannot be opened is dropped with a metric, never routed as an empty payload** — delivering it would hand an awaiting caller silence indistinguishable from a slow peer.
+
+### Added — `scripts/consumer-gate.sh`, a release gate that builds a real iOS consumer
+
+Both defects reported against 0.5.1 were found by consuming seats, not by anything here, and the check that ran before publishing was a **macOS** probe while both consumers are **iOS**. A gate whose coverage does not match its consumers is not a gate.
+
+Adopted from dev-team-2's practice rather than approximated: **wipe DerivedData** (an incremental build reports the *previous* version's module cache as confidently as the current one), read what actually **resolved** rather than what was requested, and take the verdict from the **error count**, never the exit code. It caught a fault in itself on first run — a guessed scheme name produced a failure that looked like a compile error while nothing had compiled — and it is verified to have teeth: breaking a symbol makes it fail with exactly the error shape reported against 0.5.1.
+
+### Still not true, so nothing here should be read as claiming it
+
+Swift↔Node payload encryption remains **impossible by design**: the two implementations disagree about the shape of an encrypted frame, so the peer-key tolerance stays withdrawn (SYMCore 0.3.96) until the shapes are aligned. The interop gate drives **plaintext only** — when the alignment lands, a passing gate will not be evidence that Swift↔Node encryption works, and the gate must be extended in the same change.
+
 ## 0.5.2
 
 **0.5.1 should not be used** — it carries a real regression (below). A second defect reported against it turned out not to exist; that report and this entry's original claim are corrected in place rather than deleted.
