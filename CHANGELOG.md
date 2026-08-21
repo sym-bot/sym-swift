@@ -2,6 +2,24 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.5.1
+
+### Added — `payload-seal-v1` (the primitive; wiring to the send path follows)
+
+The CAT7 categories have been end-to-end encrypted since 0.3.x. The application payload riding beside them never was — the sending path assigned it in the clear and encrypted only `categories`. So a transcribed spoken thought on its way to a user's own sidecar crossed the relay readable, and an app claiming end-to-end encryption between two phones was telling the truth about its categories and not about its payloads.
+
+The cryptography lives in **SYMCore 0.3.95**, not here, so both ends of a pair run the same code: `derivePayloadKey`, `sealPayload`, `openPayload`. The payload key is deliberately **not** the category key — same X25519 agreement, HKDF with a different `info`, both node ids sorted into it so the ends agree without negotiating and a key cannot be replayed against a third peer. The AAD binds a seal to its `cmbKey` and recipient, so a relay that forwards payloads verbatim cannot lift a seal off one frame and staple it onto another. Signing is untouched: the payload still joins after the CMB is signed, because pulling it into the preimage would change every `cmbKey` and break content addressing across the fleet.
+
+This release ships the primitive and its tests. **The send and receive paths are not yet sealed** — that is the next change, and it is deliberately separate so the transport and the sealing can be verified independently.
+
+### Fixed — a Swift↔Node pair never derived a shared secret, and nothing said so
+
+Via SYMCore 0.3.95. This SDK parsed a peer's advertised key as **raw 32 bytes**; the Node runtime advertises a **44-byte DER/SPKI** key and parses incoming keys as DER in turn. Each side rejected the other's encoding, and **both swallowed the failure into a log line** — so nothing upstream ever learned the pair was unprotected and every Swift↔Node pair fell back to plaintext. Both encodings are now accepted; advertising stays raw-32, so a mixed fleet converges without a flag day.
+
+### Fixed — `LICENSE` was a stub, and GitHub said so
+
+The file was 801 bytes: the Apache heading, the "TERMS AND CONDITIONS" line, then the short source-file boilerplate telling a reader where to *obtain* the licence — and no terms beneath the heading. It looks like a licence until you notice nothing follows. Apache-2.0 §4(a) asks a redistributor to include a copy, and a file naming where the licence lives is not a copy; GitHub's detector reported this repo as `other` while `sym` reported `apache-2.0`. Now carries the full text.
+
 ## 0.5.0
 
 ### Breaking for consumers — in two different ways, and the quiet one is worse
