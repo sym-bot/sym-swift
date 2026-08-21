@@ -4,15 +4,15 @@
 
 ## 0.5.2
 
-Two defects in 0.5.1, both found by consuming seats within an hour of release. **0.5.1 should not be used.**
+**0.5.1 should not be used** — it carries a real regression (below). A second defect reported against it turned out not to exist; that report and this entry's original claim are corrected in place rather than deleted.
 
-### Fixed — 0.5.1 did not COMPILE for an iOS consumer
+### Changed — the committed `SYMCore.xcframework` is deleted (hygiene, NOT a bug fix)
 
-A stale `SYMCore.xcframework` was **committed at the repository root**. The manifest delivers SYMCore by `binaryTarget` URL and never references the committed copy, but on the iOS-simulator slice the compiler bound against it — and that copy predates `payload-seal-v1`, so 0.5.1's own `PayloadSeal.swift` could not compile against the SYMCore its own repository shipped. Six errors, zero tests run, deterministic.
+A stale `SYMCore.xcframework` was committed at the repository root: 58 tracked files the manifest never references, since SYMCore is delivered by `binaryTarget` URL. It is deleted and `.gitignore`d as dead weight and a shadowing hazard in principle.
 
-The published artifact was never the problem. It is deleted and `.gitignore`d.
+**Correction to this entry as first published.** It originally claimed 0.5.1 "did not COMPILE for an iOS consumer" and blamed that committed copy. **Both halves were false.** The report came from a consumer's *incremental* build carrying a stale module cache across a resolve where the binary changed underneath it; the reporter retracted it, and I confirmed independently — a fresh clone of `v0.5.1` with wiped DerivedData builds clean for iOS Simulator, committed framework present. Nothing about the shadowing mechanism was ever tested. It was a plausible mechanism that survived no test, which is a guess wearing a diagnosis.
 
-Two instrument lessons, both paid for: `nm` finds the symbols in the downloaded binary and would have produced a false all-clear — **presence in a binary is not membership on a type**, and the `.swiftinterface` is the instrument bound to that question. And the release check that passed before publishing was a **macOS** consumer probe; the consumers are **iOS**, which is the slice that shadowed. Verifying on the wrong platform is not verifying.
+The lesson that *is* evidenced, and it is the reporter's: **an incremental build is not a consumer verification.** It reports the previous version's module cache as confidently as the current one, with nothing saying which. A consumer check must run from a **wiped DerivedData**, and the verdict is the `.xcresult` error and test counts — never an exit code.
 
 ### Fixed — 0.5.1's peer-key tolerance armed silent Swift↔Node frame loss
 
