@@ -2,6 +2,28 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.5.2
+
+Two defects in 0.5.1, both found by consuming seats within an hour of release. **0.5.1 should not be used.**
+
+### Fixed — 0.5.1 did not COMPILE for an iOS consumer
+
+A stale `SYMCore.xcframework` was **committed at the repository root**. The manifest delivers SYMCore by `binaryTarget` URL and never references the committed copy, but on the iOS-simulator slice the compiler bound against it — and that copy predates `payload-seal-v1`, so 0.5.1's own `PayloadSeal.swift` could not compile against the SYMCore its own repository shipped. Six errors, zero tests run, deterministic.
+
+The published artifact was never the problem. It is deleted and `.gitignore`d.
+
+Two instrument lessons, both paid for: `nm` finds the symbols in the downloaded binary and would have produced a false all-clear — **presence in a binary is not membership on a type**, and the `.swiftinterface` is the instrument bound to that question. And the release check that passed before publishing was a **macOS** consumer probe; the consumers are **iOS**, which is the slice that shadowed. Verifying on the wrong platform is not verifying.
+
+### Fixed — 0.5.1's peer-key tolerance armed silent Swift↔Node frame loss
+
+Via SYMCore 0.3.96, which withdraws it. Accepting the Node runtime's DER-encoded key looked like it fixed Swift↔Node end-to-end encryption. It did not: the encoding mismatch was the only thing keeping a **worse** failure dormant.
+
+The two implementations also disagree about the *shape* of an encrypted frame — this SDK emits `encryptedFields` and `_e2e` at top level and clears `cmb`; the canonical runtime encrypts in place and has **no handler for the top-level members at all**. Deriving a shared secret is what arms that: once one exists the send path encrypts, emits a shape the peer cannot read, and the peer drops the frame **silently, in both directions**, presenting as a request that never returns — indistinguishable from a slow model or an unreachable peer.
+
+DER is refused again, guarded by a test that fails any attempt to re-accept it before the frame shapes are aligned. When they are, the interop gate must drive an **encrypted** frame in both directions; the gate shipped with 0.5.1 drove plaintext only, which is why it stayed green through a regression.
+
+`payload-seal-v1` is unaffected and still ships — Swift↔Swift shares both the encoding and the frame shape. The send and receive paths remain unsealed; that wiring is still a separate change.
+
 ## 0.5.1
 
 ### Added — `payload-seal-v1` (the primitive; wiring to the send path follows)

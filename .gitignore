@@ -5,3 +5,9 @@ DerivedData/
 *.xcodeproj
 .DS_Store
 build/
+
+# The xcframework is delivered by the binaryTarget URL in Package.swift.
+# A same-named framework committed at the package root SHADOWS that download on
+# some platform slices — it build-broke 0.5.1 for iOS consumers while the
+# published artifact was fine. Never commit it again.
+SYMCore.xcframework/
