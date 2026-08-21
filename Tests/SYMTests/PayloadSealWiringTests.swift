@@ -17,6 +17,8 @@ import XCTest
 
 final class PayloadSealWiringTests: XCTestCase {
 
+    typealias RequestIDBox = CorrelationTests.RequestIDBox
+
     private let secret = "how did my human move today"
 
     private func payload() -> Data {
@@ -137,5 +139,66 @@ final class PayloadSealWiringTests: XCTestCase {
 
         XCTAssertFalse(fired, "an unopenable seal must NOT surface as a request")
         XCTAssertTrue(metric, "and it must be visible as arrived-but-unopenable, not as silence")
+    }
+}
+
+// MARK: - requireSeal: an unsealed send becomes impossible, not merely detectable
+
+extension PayloadSealWiringTests {
+
+    func testRequireSealREFUSESTOSENDWhenThePeerCannotBeKeyed() async {
+        // The claim an app wants to make is "only the two of you can read this". Reading a
+        // would-this-be-sealed flag and then sending is an inference about the next
+        // moment; requiring the seal makes the unsealed send impossible, which is what
+        // lets the app say it rather than believe it.
+        let node = SymNode(name: "seal-req-\(UUID().uuidString.prefix(8))")
+        node.start()
+        defer { node.stop() }
+
+        var dispatched = false
+        let exchange = SymExchange(registry: node.correlationRegistry) { _, _, peerId, requireSeal in
+            if requireSeal, !node.payloadSealState(for: peerId) { return .cannotSeal }
+            dispatched = true
+            return .sent
+        }
+
+        do {
+            _ = try await exchange.request(payload: payload(), categories: [:],
+                                           to: "unkeyable-peer", timeout: 5, requireSeal: true)
+            XCTFail("expected cannotSeal")
+        } catch let error as SymRequestError {
+            XCTAssertEqual(error, .cannotSeal)
+        } catch {
+            XCTFail("unexpected: \(error)")
+        }
+        XCTAssertFalse(dispatched, "NOTHING may go out — not even plaintext, not even once")
+    }
+
+    func testWithoutRequireSealTheSamePeerStillGetsAPlaintextSend() async {
+        // The default stays permissive on purpose: the sidecar reads the payload as
+        // plaintext by design, so requiring a seal there would refuse every LLM call.
+        let node = SymNode(name: "seal-noreq-\(UUID().uuidString.prefix(8))")
+        node.start()
+        defer { node.stop() }
+
+        let box = RequestIDBox()
+        let exchange = SymExchange(registry: node.correlationRegistry) { wire, _, peerId, requireSeal in
+            if requireSeal, !node.payloadSealState(for: peerId) { return .cannotSeal }
+            if let o = (try? JSONSerialization.jsonObject(with: wire)) as? [String: Any],
+               let rid = o["request_id"] as? String { box.set(rid) }
+            return .sent
+        }
+
+        do {
+            _ = try await exchange.request(payload: payload(), categories: [:],
+                                           to: "unkeyable-peer", timeout: 0.3)
+            XCTFail("expected a timeout, not a refusal")
+        } catch let error as SymRequestError {
+            XCTAssertEqual(error, .timeout(after: 0.3),
+                           "it SENT and then timed out — the refusal is opt-in, not the default")
+        } catch {
+            XCTFail("unexpected: \(error)")
+        }
+        XCTAssertNotNil(box.get(), "the send happened")
     }
 }

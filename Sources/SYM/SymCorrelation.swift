@@ -68,6 +68,15 @@ public enum SymRequestError: Error, Equatable {
     /// is NOT the peer-departure fast-fail the review rejected: it fires only
     /// when no route exists at send time, never on presence flap mid-flight.
     case peerUnknown
+    /// The caller required a sealed payload and this peer cannot be keyed, so
+    /// **nothing was sent**.
+    ///
+    /// This exists so an app can make a claim it is able to keep. Reading a
+    /// "would this be sealed" flag and then sending is an inference about the
+    /// next moment; requiring the seal makes an unsealed send *impossible*,
+    /// which is the difference between an app that believes a conversation is
+    /// private and one that can say so.
+    case cannotSeal
 }
 
 /// Outcome of handing a built frame to the node's send path.
@@ -75,6 +84,8 @@ enum SymDispatchOutcome: Sendable {
     case sent
     case notRunning
     case peerUnknown
+    /// The caller required sealing and this peer cannot be keyed. Nothing was sent.
+    case cannotSeal
 }
 
 // MARK: - Correlation registry
@@ -177,7 +188,8 @@ public struct SymExchange: Sendable {
     /// guaranteed-empty wait.
     let dispatch: @Sendable (_ wirePayload: Data,
                              _ categories: [CMBCategory: CMBCategoryVector],
-                             _ peerId: String) -> SymDispatchOutcome
+                             _ peerId: String,
+                             _ requireSeal: Bool) -> SymDispatchOutcome
 
     /// Send a directed payload-bearing CMB and await the directed response
     /// whose payload echoes the generated `request_id`.
@@ -192,12 +204,24 @@ public struct SymExchange: Sendable {
     ///   - timeout: Caller-set window, per call — deliberately no default,
     ///     because only the caller knows whether this is an impatient query
     ///     or one that should ride out an upstream cold start.
+    ///   - requireSeal: When true, the payload is sent ONLY if it can be
+    ///     encrypted for this peer; otherwise nothing is sent and the call
+    ///     throws ``SymRequestError/cannotSeal``.
+    ///
+    ///     Pass `true` for anything the user would not want a transport to
+    ///     read — a transcribed spoken thought, say. It is the difference
+    ///     between an app that *believes* a conversation is private and one
+    ///     that can *say so*: an unsealed send stops being something to
+    ///     detect and becomes something that cannot happen. Defaults to
+    ///     `false`, because the sidecar path reads the payload as plaintext
+    ///     by design and requiring a seal there would refuse every call.
     /// - Returns: The matched ``SymEnvelope``.
     /// - Throws: ``SymRequestError``.
     public func request(payload: Data,
                         categories: [CMBCategory: CMBCategoryVector],
                         to peerId: String,
-                        timeout: TimeInterval) async throws -> SymEnvelope {
+                        timeout: TimeInterval,
+                        requireSeal: Bool = false) async throws -> SymEnvelope {
         guard var payloadObject = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any] else {
             throw SymRequestError.invalidPayload
         }
@@ -211,7 +235,7 @@ public struct SymExchange: Sendable {
                     continuation.resume(throwing: SymRequestError.cancelled)
                     return
                 }
-                switch dispatch(wirePayload, categories, peerId) {
+                switch dispatch(wirePayload, categories, peerId, requireSeal) {
                 case .sent:
                     break
                 case .notRunning:
@@ -219,6 +243,9 @@ public struct SymExchange: Sendable {
                     return
                 case .peerUnknown:
                     registry.take(requestId)?.resume(throwing: SymRequestError.peerUnknown)
+                    return
+                case .cannotSeal:
+                    registry.take(requestId)?.resume(throwing: SymRequestError.cannotSeal)
                     return
                 }
                 let registry = self.registry

@@ -29,7 +29,7 @@ final class CorrelationTests: XCTestCase {
     /// drive the same registry, so what these tests exercise is the shipped
     /// machinery and not a parallel implementation of it.
     private func offlineExchange(_ node: SymNode) -> SymExchange {
-        SymExchange(registry: node.correlationRegistry) { _, _, _ in .sent }
+        SymExchange(registry: node.correlationRegistry) { _, _, _, _ in .sent }
     }
 
     /// The request id the node minted for the single in-flight request.
@@ -38,7 +38,7 @@ final class CorrelationTests: XCTestCase {
     /// dispatch was handed.
     private func capturingExchange(_ node: SymNode,
                                    into box: RequestIDBox) -> SymExchange {
-        SymExchange(registry: node.correlationRegistry) { wirePayload, _, _ in
+        SymExchange(registry: node.correlationRegistry) { wirePayload, _, _, _ in
             if let obj = (try? JSONSerialization.jsonObject(with: wirePayload)) as? [String: Any],
                let rid = obj["request_id"] as? String {
                 box.set(rid)

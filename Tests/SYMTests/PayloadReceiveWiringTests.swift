@@ -89,7 +89,7 @@ final class PayloadReceiveWiringTests: XCTestCase {
         defer { node.stop() }
 
         let box = CorrelationTests.RequestIDBox()
-        let exchange = SymExchange(registry: node.correlationRegistry) { wirePayload, _, _ in
+        let exchange = SymExchange(registry: node.correlationRegistry) { wirePayload, _, _, _ in
             if let obj = (try? JSONSerialization.jsonObject(with: wirePayload)) as? [String: Any],
                let rid = obj["request_id"] as? String { box.set(rid) }
             return .sent

@@ -1016,11 +1016,14 @@ public final class SymNode {
     /// object as a sibling of the CAT7 content (Node parity) and is never
     /// part of the cmbKey hash or a signing preimage.
     public var exchange: SymExchange {
-        SymExchange(registry: correlationRegistry) { [weak self] wirePayload, categories, peerId in
+        SymExchange(registry: correlationRegistry) { [weak self] wirePayload, categories, peerId, requireSeal in
             guard let self else { return .notRunning }
             guard self.isRunning else { return .notRunning }
             let peerIsRoutable: Bool = self.peerQueue.sync { self.peers[peerId] != nil }
             guard peerIsRoutable else { return .peerUnknown }
+            // Refuse BEFORE building the frame. A caller that required sealing gets
+            // nothing sent rather than a plaintext send it has to detect afterwards.
+            if requireSeal, !self.payloadSealState(for: peerId) { return .cannotSeal }
             let frame = self.makePayloadCMBFrame(payload: wirePayload, categories: categories, for: peerId)
             self.sendToPeer(nodeId: peerId, frame: frame)
             return .sent
