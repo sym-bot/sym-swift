@@ -375,6 +375,15 @@ public final class SymNode {
     /// Access only via peerQueue (same lock as peers dict).
     private var peerSharedSecrets: [String: SymmetricKey] = [:]
 
+    /// Peers' advertised X25519 public keys, as announced on their handshake.
+    /// Access only via peerQueue.
+    ///
+    /// Kept alongside `peerSharedSecrets` rather than replacing it: the CATEGORY key is
+    /// derived once and cached, but the PAYLOAD key is derived per send from the same
+    /// agreement with a different HKDF info, so the raw public key has to survive the
+    /// handshake for `payload-seal-v1` to be possible at all.
+    private var peerE2EPublicKeys: [String: Data] = [:]
+
     /// Active peer sessions keyed by nodeId. Access only via peerQueue.
     private var peers: [String: PeerState] = [:]
     private let peerQueue = DispatchQueue(label: "bot.sym.peers", qos: .userInitiated)
@@ -430,6 +439,14 @@ public final class SymNode {
     internal func testHook_rejectsSignature(signed: Bool, valid: Bool, error: String?) -> Bool {
         rejectsSignature(signed: signed, valid: valid, error: error)
     }
+
+    /// Test seam: seed a peer's advertised E2E public key without a handshake.
+    internal func testHook_setPeerE2EPublicKey(_ key: Data, for peerId: String) {
+        peerQueue.sync { self.peerE2EPublicKeys[peerId] = key }
+    }
+
+    /// This node's advertised E2E public key, base64 — the value peers key against.
+    public var e2ePublicKeyBase64: String? { e2ePublicKeyB64 }
 
     /// Test seam: build the payload-carrying frame without a live peer.
     internal func testHook_makePayloadCMBFrame(payload: Data,
@@ -1027,10 +1044,19 @@ public final class SymNode {
         sendToPeer(nodeId: request.from, frame: frame)
     }
 
-    /// Build the signed, payload-carrying CMB frame both halves send —
-    /// same per-peer E2E stance as ``relay(_:)``: categories encrypt when a
-    /// shared secret exists; the payload itself rides plaintext either way
-    /// (Node parity — the sidecar reads it as a plain sibling).
+    /// Build the signed, payload-carrying CMB frame both halves send.
+    ///
+    /// The payload is SEALED whenever a payload key can be derived for the peer —
+    /// `payload-seal-v1`, keyed separately from the categories. Where no key can be
+    /// derived the payload rides plaintext, which is the pre-0.5.x behaviour and is what
+    /// Node peers still need, since the sidecar reads `msg.cmb.payload` as a plain
+    /// sibling.
+    ///
+    /// **Sealing is silent when it succeeds and silent when it does not**, so
+    /// ``payloadSealState(for:)`` exists to let a caller ask which it got. A caller that
+    /// must not send a thought in the clear checks that BEFORE calling, rather than
+    /// discovering afterwards — the SDK cannot make that judgement, because whether
+    /// plaintext is acceptable depends on what the payload carries.
     private func makePayloadCMBFrame(payload: Data,
                                      categories: [CMBCategory: CMBCategoryVector],
                                      for peerId: String) -> SymFrame {
@@ -1044,7 +1070,22 @@ public final class SymNode {
             source: name, tags: [], originTimestamp: ts, storedAt: ts
         )
         frame.cmb = cmb
-        frame.cmbPayload = payload
+
+        // Seal the payload if we can. The key is derived per peer from the same X25519
+        // agreement as the categories but with a different HKDF info, and the AAD binds
+        // the seal to THIS cmb key and THIS recipient — so a relay forwarding payloads
+        // verbatim cannot move a seal onto another frame.
+        let peerPubForSeal: Data? = peerQueue.sync { self.peerE2EPublicKeys[peerId] }
+        if let peerPub = peerPubForSeal,
+           let key = PayloadSeal.payloadKey(myPrivateKey: e2ePrivateKey, peerPublicKey: peerPub,
+                                            myNodeId: identity.nodeId, peerNodeId: peerId),
+           let sealed = PayloadSeal.seal(payload, key: key,
+                                         aad: PayloadSeal.aad(cmbKey: cmb.key, recipientNodeId: peerId)),
+           let sealedData = try? JSONSerialization.data(withJSONObject: sealed) {
+            frame.cmbPayload = sealedData
+        } else {
+            frame.cmbPayload = payload
+        }
 
         let sharedSecretForPeer: SymmetricKey? = peerQueue.sync { self.peerSharedSecrets[peerId] }
         if let sharedSecret = sharedSecretForPeer,
@@ -1056,12 +1097,52 @@ public final class SymNode {
         return frame
     }
 
+    /// Whether a payload sent to this peer right now would be sealed.
+    ///
+    /// Exists because sealing is invisible either way on the wire and a caller carrying
+    /// private content — a transcribed spoken thought, say — needs to decide BEFORE
+    /// sending rather than learn afterwards. `false` is the honest answer for a peer that
+    /// has advertised no key, including every Node peer today.
+    public func payloadSealState(for peerId: String) -> Bool {
+        let peerPub: Data? = peerQueue.sync { self.peerE2EPublicKeys[peerId] }
+        guard let peerPub else { return false }
+        return PayloadSeal.payloadKey(myPrivateKey: e2ePrivateKey, peerPublicKey: peerPub,
+                                      myNodeId: identity.nodeId, peerNodeId: peerId) != nil
+    }
+
     /// Route an inbound payload: resolve the pending request it answers, or
     /// surface it as ``SymEvent/requestReceived(envelope:)``. Called from the
     /// cmb receive path AFTER signature verification and BEFORE the SVAF
     /// verdict — the payload survives admitted and rejected outcomes alike
     /// (Node parity: `_preserveIncomingPayload`).
-    private func handleIncomingPayload(_ payloadData: Data, from nodeId: String, peerName: String, cmbKey: String?) {
+    private func handleIncomingPayload(_ rawPayload: Data, from nodeId: String, peerName: String, cmbKey: String?) {
+        var payloadData = rawPayload
+
+        // A sealed payload is opened before anything reads it. `_seal` names the scheme,
+        // so a receiver tells sealed from plaintext without negotiating a version.
+        if let outer = (try? JSONSerialization.jsonObject(with: rawPayload)) as? [String: Any],
+           PayloadSeal.isSealed(outer) {
+            let senderPub: Data? = peerQueue.sync { self.peerE2EPublicKeys[nodeId] }
+            guard let key = senderPub.flatMap({
+                      PayloadSeal.payloadKey(myPrivateKey: e2ePrivateKey, peerPublicKey: $0,
+                                             myNodeId: identity.nodeId, peerNodeId: nodeId)
+                  }),
+                  let cmbKey,
+                  let opened = PayloadSeal.open(outer, key: key,
+                                                aad: PayloadSeal.aad(cmbKey: cmbKey,
+                                                                     recipientNodeId: identity.nodeId)) else {
+                // FAIL LOUD AND STOP. A seal we cannot open is NOT an empty payload and
+                // must never be routed as one: the awaiting caller would be handed
+                // silence that looks like a slow peer. Surfaced as a metric so an
+                // operator sees "arrived and could not be opened" rather than nothing.
+                logger.error("[SYM] payload: SEALED payload from \(peerName) could not be opened — dropping, not delivering")
+                emit(.metric(type: "payload-seal-open-failed",
+                             detail: ["from": peerName, "cmb": cmbKey ?? "none"]))
+                return
+            }
+            payloadData = opened
+        }
+
         guard let payloadObject = (try? JSONSerialization.jsonObject(with: payloadData)) as? [String: Any],
               let requestId = payloadObject["request_id"] as? String, !requestId.isEmpty else {
             logger.info("[SYM] payload: CMB payload from \(peerName) carries no request_id — ignoring")
@@ -1726,6 +1807,10 @@ public final class SymNode {
             // Derive E2E shared secret if peer advertises a public key
             if let peerPubKeyB64 = frame.e2ePublicKey,
                let peerPubKeyData = Data(base64Encoded: peerPubKeyB64) {
+                // Keep the raw key regardless of whether a CATEGORY secret derives from
+                // it: the payload key is derived per send with a different HKDF info, so
+                // discarding the key here would make payload sealing impossible.
+                peerQueue.sync { self.peerE2EPublicKeys[nodeId] = peerPubKeyData }
                 if let sharedSecret = E2ECrypto.deriveSharedSecret(
                     myPrivateKey: e2ePrivateKey,
                     peerPublicKey: peerPubKeyData
