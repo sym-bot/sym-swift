@@ -725,15 +725,43 @@ public final class SymNode {
     /// broadcasts it. Cognitive signals propagate to peers only as CMBs via
     /// ``remember(categories:tags:parents:originTimestamp:)``.
     private func reencodeAndBroadcast() {
+        // MMP v0.2.2: do not broadcast hidden state. SVAF (Xu, 2026, §3.4) requires that hidden
+        // states stay private to each agent. The local state update is sufficient for the local
+        // CfC to evaluate future incoming CMBs at SVAF Layer 4. (The name predates that rule.)
+        reencodeLocalState()
+    }
+
+    /// Re-encode local state from accumulated memory — the one place state is derived from the
+    /// store, so every caller agrees on what "state" means.
+    private func reencodeLocalState() {
         let context = buildContext()
         guard context.count > 5 else { return }
 
         let (h1, h2) = ContextEncoder.encode(context)
         meshNode.updateLocalState(h1, h2, confidence: 0.8)
-        // MMP v0.2.2: do not broadcast hidden state. SVAF (Xu, 2026, §3.4)
-        // requires that hidden states stay private to each agent. The local
-        // state update above is sufficient for the local CfC to evaluate
-        // future incoming CMBs at SVAF Layer 4.
+    }
+
+    /// Re-encode local state after a peer's block entered the store.
+    ///
+    /// THE OMISSION THIS CLOSES. Every `updateLocalState` call site in this file was reached from
+    /// exactly three places — `initLocalState()`, `reencodeAndBroadcast()` and `_afterRemember()`:
+    /// init, broadcast, and the node's OWN remember. Nothing on admit. So a node that had admitted
+    /// five hundred peer CMBs carried the same local state as one that had admitted none, even
+    /// though `buildContext()` reads the very store those blocks land in.
+    ///
+    /// Found in the JS substrate first (@sym-bot/sym 0.12.1, where the neural gate moved state and
+    /// the production heuristic gate did not) and reported against this implementation by
+    /// dev-team-3 on 2026-08-24, because MeloMove links it. There is no neural/heuristic split
+    /// here, so in Swift it was never an asymmetry — it was a plain omission on the only path.
+    ///
+    /// WHAT THIS IS NOT. Still a stateless re-encode: prior state is discarded and recomputed from
+    /// the store, so it is not recurrent and nothing learns. That is deliberate — the recurrent
+    /// cell's dimension is held until the learning testbed informs it (founder decision D5,
+    /// 2026-07-05). Observable behaviour changes little today, because SVAF scores per-category
+    /// vectors against anchor memory and does not read the hidden state. The point is that state
+    /// becomes real, so a consumer can exist.
+    private func reencodeLocalStateAfterAdmit() {
+        reencodeLocalState()
     }
 
     // MARK: - Lifecycle
@@ -2051,6 +2079,7 @@ public final class SymNode {
                     cmb: incomingCMB
                 )
                 store.receiveFromPeer(peerId: nodeId, entry: absorbedEntry)
+                reencodeLocalStateAfterAdmit()
                 _metrics.cmbAccepted += 1
 
                 logger.info("[SYM] memory: SVAF REDUNDANT from \(peerName) — absorbed with no fusion (threshold: \(self.svafRedundancyThreshold))")
@@ -2184,6 +2213,7 @@ public final class SymNode {
                 validatorOriginKeys.insert(entry.key)
             }
             store.receiveFromPeer(peerId: nodeId, entry: entry)
+            reencodeLocalStateAfterAdmit()
 
             // Protocol metrics + cmb-accepted event
             _metrics.cmbAccepted += 1
