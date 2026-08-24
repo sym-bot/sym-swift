@@ -2,6 +2,34 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.5.4
+
+### Fixed — local state re-encodes when a peer's block enters the store
+
+Every `updateLocalState` call site in `SymNode.swift` was reached from exactly three places:
+`initLocalState()`, `reencodeAndBroadcast()` and `_afterRemember()` — init, broadcast, and the
+node's OWN remember. Nothing on admit. So a node that had admitted five hundred peer CMBs carried
+exactly the same local state as one that had admitted none, even though `buildContext()` reads the
+very store those blocks land in.
+
+Both peer-store sites now re-encode: the redundant-absorb path and the fused admit. They share one
+`reencodeLocalState()` with `reencodeAndBroadcast()`, because the same defect in the JavaScript
+substrate was two paths that had drifted apart, and a second copy is how that starts.
+
+Found in `@sym-bot/sym` first (0.12.1, where the neural gate moved state and the production
+heuristic gate did not) and reported against this implementation by dev-team-3, because MeloMove
+links it. There is no neural/heuristic split here, so in Swift it was never an asymmetry — a plain
+omission on the only path.
+
+**What this does not change.** It is still a stateless re-encode: prior state is discarded and
+recomputed from the store, so nothing here is recurrent and nothing learns. SVAF scores
+per-category vectors against anchor memory and does not read the hidden state, so no admission
+decision changes as a result. What it buys is that local state is real, so something can be built
+on it.
+
+The regression test is structural because a behavioural one could not have caught this: there is a
+single admit path, it did what it said, and what was missing was a line nobody had written.
+
 ## 0.5.3
 
 ### Added — the payload seal is now WIRED, and refusable
