@@ -2,6 +2,27 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.5.5
+
+### Fixed — a cold launch no longer dials the relay against itself
+
+A phased app startup that stops and restarts its node within a few seconds dialed the relay
+while the node's own previous socket was still draining server-side — the socket cancel is
+asynchronous, and a proxy in front of the relay can hold the close for seconds. The relay then
+answered the new dial with its duplicate-identity refusal, and every cold launch burned a dial
+and logged an error, colliding with nobody but itself.
+
+Two changes close it. The node now remembers when its relay session began tearing down, and
+the next start waits out the remainder of a six-second grace before dialing — one quiet
+delayed dial instead of a logged self-refusal; a second start during the grace is absorbed
+rather than doubled. And when a duplicate-identity refusal does arrive (relays ≥ 0.1.6 name
+the refusal kind machine-readably; older relays match on the message), it is logged as the
+transient it is and retried after the freshness window, instead of climbing an exponential
+ladder that started at one second and re-collided.
+
+Expected cold-launch log on this version: one dial, one `node: started`, no duplicate-identity
+lines.
+
 ## 0.5.4
 
 ### Fixed — local state re-encodes when a peer's block enters the store
