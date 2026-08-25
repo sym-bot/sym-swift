@@ -764,6 +764,17 @@ public final class SymNode {
         reencodeLocalState()
     }
 
+    /// m136: when the relay session last began tearing down — the next start()'s dial waits
+    /// out the relay's duplicate-identity freshness window from this instant.
+    private var lastRelayDisconnectAt: Date?
+
+    /// Test seams (m136): the computed grace, and a way to age the stamp.
+    var relayGraceForTest: TimeInterval {
+        let sinceStop = lastRelayDisconnectAt.map { Date().timeIntervalSince($0) } ?? .infinity
+        return max(0, 6.0 - sinceStop)
+    }
+    func setLastRelayDisconnectForTest(_ d: Date?) { lastRelayDisconnectAt = d }
+
     // MARK: - Lifecycle
 
     /// Start the node — begins discovery and listens for peers.
@@ -783,7 +794,14 @@ public final class SymNode {
         if let relayURL {
             let relay = SymRelaySession(url: relayURL, identity: identity, token: relayToken, room: relayRoom)
             relay.delegate = self
-            relay.start()
+            // m136: a restart within the relay's duplicate-identity freshness window collides
+            // with our own draining socket (founder device log, 2026-08-25: two dials, one
+            // 4006, three 'node: started' lines in one cold launch). Wait out the remainder
+            // of the window instead of dialing into it — Bonjour is unaffected, the relay is
+            // the secondary transport, and one quiet delayed dial beats a logged self-refusal.
+            let sinceStop = lastRelayDisconnectAt.map { Date().timeIntervalSince($0) } ?? .infinity
+            let grace = max(0, 6.0 - sinceStop)
+            relay.start(afterDelay: grace)
             self.relaySession = relay
         }
 
@@ -832,6 +850,7 @@ public final class SymNode {
         statsTimer?.invalidate()
         statsTimer = nil
 
+        if relaySession != nil { lastRelayDisconnectAt = Date() }
         relaySession?.stop()
         relaySession = nil
 

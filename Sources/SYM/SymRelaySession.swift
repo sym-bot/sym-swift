@@ -246,11 +246,23 @@ final class SymRelaySession: @unchecked Sendable {
     // MARK: - Lifecycle
 
     func start() {
-        queue.async { [self] in
+        start(afterDelay: 0)
+    }
+
+    /// m136: a start within seconds of a previous stop dials into the relay's own
+    /// duplicate-identity freshness window — the old socket's close is async (and lags further
+    /// behind a proxy), so the node collides with ITSELF and burns a dial per cold-launch
+    /// phase. Callers that know a disconnect just happened pass the remaining grace.
+    func start(afterDelay delay: TimeInterval) {
+        queue.asyncAfter(deadline: .now() + max(0, delay)) { [self] in
+            guard !_running else { return }   // idempotent: a second start during the grace is absorbed
             _running = true
             _connect()
         }
     }
+
+    /// Test seam (m136): whether the session considers itself running.
+    var isRunningForTest: Bool { _running }
 
     func stop() {
         queue.async { [self] in
@@ -442,13 +454,24 @@ final class SymRelaySession: @unchecked Sendable {
 
         case "relay-error":
             let msg = json["message"] as? String ?? "Unknown relay error"
+            let kind = json["kind"] as? String   // relay ≥0.1.6 names the refusal machine-readably
             // A refusal can reach us two ways: the socket closes with a 4xxx
             // code, or the relay says so in a message first. Recording both
             // means a client asking "why am I not on the channel?" gets an
             // answer either way — logging it only, as before, left the app
             // with a silent non-membership it could not describe.
             recordRelayError(msg)
-            logger.error("[SYM] relay: error: \(msg)")
+            if kind == "duplicate-identity" || msg.contains("duplicate identity") {
+                // m136: on a phased cold launch this is almost always OUR OWN previous socket
+                // still draining server-side (stop()'s cancel is async and the proxy close can
+                // lag seconds) — an expected transient, not an error the operator can act on.
+                // Log at info and retry after the server's freshness window instead of the
+                // exponential ladder starting at 1s (which re-collides).
+                logger.info("[SYM] relay: previous connection for this identity still draining — retrying after the freshness window")
+                reconnectDelay = 6.0
+            } else {
+                logger.error("[SYM] relay: error: \(msg)")
+            }
 
         default:
             // Routed frame from a peer
