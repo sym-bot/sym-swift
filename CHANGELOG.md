@@ -2,6 +2,53 @@
 
 > **Note:** Versions 0.3.24 – 0.3.54 were released as git tags without changelog entries. Changelog resumes at 0.3.55 below.
 
+## 0.6.0
+
+### Added — the room API, whose absence is why every consumer wrote its own
+
+`SymRooms`: the room-name grammar, the room to Bonjour service-type mapping in both
+directions, canonicity, and the platform reachability check.
+
+There was no room API in this SDK at all. A room name **is** the DNS-SD service type, so
+every Swift consumer needed that mapping and each therefore wrote one. Six hand-rolled
+copies were found across the SYM.BOT tree and all of them disagreed with at least one
+other: two mapped `default` to `_default._tcp` rather than the global mesh, so the room a
+new user is most likely to type was the one room they could never join; one reshaped names
+over 15 characters into a `prefix(9) + digest` form no other implementation emits, making
+that node invisible rather than misrouted; several silently repaired names into different
+rooms. None of that was carelessness — a shared mapping that cannot be reached is a mapping
+that gets copied.
+
+`SymRooms` is a **cross-implementation contract** with `lib/rooms.js` in `@sym-bot/sym`, not
+a Swift-flavoured equivalent. It was verified differentially rather than by expectation: both
+implementations were run over the same 382-input corpus and their name, validity, service
+type and round trip compared — identical on every input, 258 valid and 124 invalid on both
+sides. A consumer replacing a hand-rolled mapping with this one is making a
+behaviour-preserving swap.
+
+Carries the canonicity rule (founder ruling, 2026-08-27): one name per room and one room per
+name, so `isValidRoom` requires the round trip through the service type to be identity, and
+**`sym` is refused** — it satisfies the grammar but maps to `_sym._tcp`, whose inverse is
+`default`, making it the global mesh under a second name. `canonicalRoom(_:)` trims
+surrounding whitespace and otherwise returns the name or `nil`; it never repairs, because
+every repair is many-to-one and silently merges rooms that different people asked for.
+
+Also included, because both app repos kept rediscovering it separately:
+`declaredServiceTypes(in:)` reads `NSBonjourServices` from the running bundle rather than a
+list duplicated in code, and returns `nil` where no list is declared so an unsandboxed daemon
+or CLI reads as unconstrained rather than as declaring nothing. `canJoinRoom(_:in:)` composes
+canonical **and** reachable as two separate facts, so a caller can tell a mistyped name from
+the platform limit instead of blaming `Info.plist` for a typo. The gate there is **local
+network privacy, not the App Sandbox** — apps declaring no sandbox entitlement are bound by
+the allow-list just the same, and it is a build-time list with no wildcard, so a room named at
+runtime cannot be joined inside such an app however valid its name.
+
+### Note
+
+This entry was written after `v0.6.0` was tagged. The tag was left where it is rather than
+moved, because a consumer had already resolved it by commit; moving a tag under a resolved
+dependency is worse than a changelog that lands a commit late.
+
 ## 0.5.5
 
 ### Fixed — a cold launch no longer dials the relay against itself
